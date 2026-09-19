@@ -311,7 +311,7 @@ export function AuthPage() {
 
           {/* System Footer Note */}
           <div className="mt-6 pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-1">
-            <span>Powered by Supabase PostgreSQL</span>
+            <span>Powered by SamTeck Digital Team</span>
             <span className="font-semibold text-slate-500">Empress Oris Herbal &amp; Mart POS</span>
           </div>
         </div>

@@ -383,7 +383,7 @@ git clone https://github.com/your-org/empress-oris-pharmacy.git
 cd empress-oris-pharmacy
 
 # Install required dependencies
-npm install
+pnpm install
 ```
 
 ### 2. Environment Variables Configuration

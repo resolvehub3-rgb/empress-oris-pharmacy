@@ -69,7 +69,7 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
       const res = await apiRequest<{ products: Product[] }>(
         `/api/pos/search?query=${encodeURIComponent(q)}${cat ? `&categoryId=${cat}` : ""}`
       );
-      setProducts(res.products || []);
+      setProducts((res.products || []).map((p: any) => ({ ...p, totalStock: p.total_stock ?? p.totalStock ?? 0 })));
     } catch (err) {
       console.warn("[POS Search] Error:", err);
     } finally {
@@ -105,7 +105,8 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
           `/api/pos/search?barcode=${encodeURIComponent(barcodeInput.trim())}`
         );
         if (res.products && res.products.length > 0) {
-          addToCart(res.products[0]);
+          const p = { ...res.products[0], totalStock: (res.products[0] as any).total_stock ?? res.products[0].totalStock ?? 0 };
+          addToCart(p);
           setBarcodeInput("");
         } else {
           // search regular query

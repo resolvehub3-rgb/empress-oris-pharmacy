@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Clock, CheckCircle2, AlertCircle, DollarSign, Calculator } from "lucide-react";
+import { Clock, CheckCircle2, AlertCircle, DollarSign, Calculator, XCircle } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -29,6 +29,19 @@ export function ShiftsPage({ onOpenShiftClick, onCloseShiftClick, hasOpenShift }
   useEffect(() => {
     fetchShifts();
   }, []);
+
+  const handleForceClose = async (shiftId: string) => {
+    if (!confirm("Force close this shift? The cashier did not close it themselves.")) return;
+    try {
+      await apiRequest("/api/shifts/close", {
+        method: "POST",
+        body: JSON.stringify({ actualCash: 0, shiftId, notes: "Force closed by owner" }),
+      });
+      fetchShifts();
+    } catch (err: any) {
+      alert("Failed to close shift: " + err.message);
+    }
+  };
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -158,6 +171,16 @@ export function ShiftsPage({ onOpenShiftClick, onCloseShiftClick, hasOpenShift }
                         >
                           {s.status}
                         </span>
+                        {s.status === "OPEN" && user?.role === "OWNER" && (
+                          <button
+                            onClick={() => handleForceClose(s.id)}
+                            className="ml-2 px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 text-[10px] font-bold rounded transition inline-flex items-center space-x-0.5"
+                            title="Force close this shift"
+                          >
+                            <XCircle className="w-3 h-3" />
+                            <span>Close</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

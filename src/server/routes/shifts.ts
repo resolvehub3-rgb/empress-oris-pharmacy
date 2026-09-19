@@ -98,23 +98,35 @@ shiftsRouter.post("/open", requireAuthentication, async (req: Request, res: Resp
   }
 });
 
-// Close Shift
+// Close Shift (employee closes own; owner can pass shiftId to close any)
 shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
-  const { actualCash, notes } = req.body;
+  const { actualCash, notes, shiftId } = req.body;
 
   if (actualCash === undefined) {
     return res.status(400).json({ error: "Actual cash count is required to close shift." });
   }
 
   try {
-    const [activeShift] = await rawSql.unsafe(`
-      SELECT * FROM cashier_shifts 
-      WHERE cashier_id = '${req.user?.id}' AND status = 'OPEN'
-      LIMIT 1
-    `);
+    const isOwner = req.user?.role === "OWNER";
+
+    let activeShift;
+    if (isOwner && shiftId) {
+      // Owner can force-close any shift by ID
+      [activeShift] = await rawSql.unsafe(`
+        SELECT * FROM cashier_shifts 
+        WHERE id = '${shiftId}' AND status = 'OPEN'
+        LIMIT 1
+      `);
+    } else {
+      [activeShift] = await rawSql.unsafe(`
+        SELECT * FROM cashier_shifts 
+        WHERE cashier_id = '${req.user?.id}' AND status = 'OPEN'
+        LIMIT 1
+      `);
+    }
 
     if (!activeShift) {
       return res.status(400).json({ error: "No open shift found to close." });
@@ -168,7 +180,7 @@ shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Res
       )
     `);
 
-    await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: req.user?.id, status: "CLOSED" });
+    await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: activeShift.cashier_id, status: "CLOSED" });
 
     return res.json({
       success: true,

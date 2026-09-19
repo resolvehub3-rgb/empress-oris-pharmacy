@@ -41,7 +41,7 @@ posRouter.get("/search", requireAuthentication, async (req: Request, res: Respon
           p.selling_price,
           p.reorder_level,
           c.name as category_name,
-          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as available_stock,
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
           COALESCE(
             json_agg(
               json_build_object(
@@ -92,7 +92,7 @@ posRouter.get("/search", requireAuthentication, async (req: Request, res: Respon
         p.selling_price,
         p.reorder_level,
         c.name as category_name,
-        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as available_stock,
+        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
         COALESCE(
           json_agg(
             json_build_object(

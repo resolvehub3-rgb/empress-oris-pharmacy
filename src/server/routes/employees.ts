@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getDb, getRawSql, schema } from "../../db";
 import { requireAuthentication, requireRole } from "../middleware/auth";
-import { getSupabase } from "../../services/supabase";
+import { getSupabase, broadcastRealtimeEvent } from "../../services/supabase";
 
 export const employeesRouter = Router();
 
@@ -124,5 +124,51 @@ employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER"
     return res.json({ success: true, employee: updated });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || "Failed to update employee status" });
+  }
+});
+
+// Delete an employee (Owner only)
+employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+
+  const { id } = req.params;
+
+  try {
+    // Prevent owner from deleting themselves
+    if (req.user?.id === id) {
+      return res.status(400).json({ error: "You cannot delete your own account." });
+    }
+
+    const result = await rawSql.begin(async (tx) => {
+      // Get user info before deletion for audit log
+      const [targetUser] = await tx`SELECT id, email, full_name, role FROM users WHERE id = ${id}`;
+      if (!targetUser) throw new Error("Employee not found.");
+
+      // Delete employee profile first (foreign key)
+      await tx`DELETE FROM employee_profiles WHERE user_id = ${id}`;
+
+      // Delete user
+      await tx`DELETE FROM users WHERE id = ${id}`;
+
+      // Audit log
+      await tx`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+        VALUES (
+          ${req.user?.id || null}, 'EMPLOYEE_DELETED', 'USER', ${id},
+          ${JSON.stringify({ email: targetUser.email, fullName: targetUser.full_name })}::jsonb
+        )
+      `;
+
+      return targetUser;
+    });
+
+    // Broadcast realtime event
+    await broadcastRealtimeEvent("EMPLOYEE_DELETED", { employeeId: id, deletedBy: req.user?.id });
+
+    return res.json({ success: true, employee: result });
+  } catch (err: any) {
+    console.error("[Delete Employee] Error:", err);
+    return res.status(400).json({ error: err.message || "Failed to delete employee." });
   }
 });

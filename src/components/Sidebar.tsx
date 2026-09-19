@@ -222,7 +222,7 @@ export function Sidebar({
   return (
     <>
       {/* 1. Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex w-64 bg-slate-900 text-slate-300 flex-col shrink-0 min-h-[calc(100vh-4rem)] border-r border-slate-800 select-none">
+      <aside className="hidden lg:flex w-64 bg-slate-900 text-slate-300 flex-col shrink-0 h-full border-r border-slate-800 select-none">
         {navContent}
       </aside>
 
@@ -241,9 +241,7 @@ export function Sidebar({
             {/* Drawer Header with Close Button */}
             <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black text-xs">
-                  EO
-                </div>
+                <img src="/logo.png" alt="Empress Oris Logo" className="w-8 h-8 rounded-xl object-contain" />
                 <div>
                   <h3 className="text-xs font-black text-white truncate max-w-[140px]">
                     {settings?.name || "Empress Oris"}

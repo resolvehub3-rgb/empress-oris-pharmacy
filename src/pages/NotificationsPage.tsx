@@ -10,8 +10,60 @@ export function NotificationsPage() {
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const res = await apiRequest<{ notifications: any[] }>("/api/notifications");
-      setNotifications(res.notifications || []);
+      const res = await apiRequest<{
+        lowStock: any[];
+        expiringSoon: any[];
+        expired: any[];
+        stored: any[];
+      }>("/api/notifications");
+
+      const alerts: Notification[] = [];
+
+      (res.lowStock || []).forEach((item) => {
+        alerts.push({
+          id: `low-${item.id}`,
+          type: item.current_stock === 0 ? "OUT_OF_STOCK" : "LOW_STOCK",
+          title: item.current_stock === 0 ? `${item.name} is Out of Stock` : `${item.name} is Low on Stock`,
+          message: `Current stock: ${item.current_stock} units (reorder at ${item.reorder_level}). SKU: ${item.sku}`,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      (res.expiringSoon || []).forEach((item) => {
+        alerts.push({
+          id: `exp-${item.id}`,
+          type: "EXPIRING_SOON",
+          title: `${item.product_name} — Batch ${item.batch_number} Expiring`,
+          message: `Expires in ${item.days_remaining} days (${new Date(item.expiry_date).toLocaleDateString("en-GB")}). Qty: ${item.current_quantity}`,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      (res.expired || []).forEach((item) => {
+        alerts.push({
+          id: `expired-${item.id}`,
+          type: "EXPIRED",
+          title: `${item.product_name} — Batch ${item.batch_number} Expired`,
+          message: `Expired on ${new Date(item.expiry_date).toLocaleDateString("en-GB")}. Qty: ${item.current_quantity} units still in stock.`,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      (res.stored || []).forEach((item) => {
+        alerts.push({
+          id: item.id,
+          type: item.type || "SYSTEM",
+          title: item.title,
+          message: item.message,
+          isRead: item.is_read,
+          createdAt: item.created_at,
+        });
+      });
+
+      setNotifications(alerts);
     } catch (err) {
       console.warn("[Notifications] Error:", err);
     } finally {
@@ -24,21 +76,18 @@ export function NotificationsPage() {
   }, []);
 
   const markAsRead = async (id: string) => {
-    try {
-      await apiRequest(`/api/notifications/${id}/read`, { method: "PUT" });
-      setNotifications(notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-    } catch (err) {
-      console.warn(err);
+    setNotifications(notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    if (!id.startsWith("low-") && !id.startsWith("exp-") && !id.startsWith("expired-")) {
+      try {
+        await apiRequest(`/api/notifications/${id}/read`, { method: "PUT" });
+      } catch (err) {
+        console.warn(err);
+      }
     }
   };
 
   const markAllRead = async () => {
-    try {
-      await apiRequest("/api/notifications/mark-all-read", { method: "PUT" });
-      setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
-    } catch (err) {
-      console.warn(err);
-    }
+    setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
   };
 
   return (

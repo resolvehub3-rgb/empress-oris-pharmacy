@@ -73,9 +73,7 @@ export function AuthPage() {
 
           <div className="relative z-10 space-y-6">
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center font-black text-xl shadow-lg border border-teal-400/30">
-                EO
-              </div>
+              <img src="/logo.png" alt="Empress Oris Logo" className="w-12 h-12 rounded-2xl object-contain shadow-lg" />
               <div>
                 <h2 className="text-lg font-black tracking-tight text-white">Empress Oris Herbal &amp; Mart</h2>
                 <p className="text-xs text-teal-400 font-medium">Pharmacy POS &amp; FEFO Inventory</p>

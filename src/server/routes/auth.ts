@@ -207,12 +207,8 @@ authRouter.post("/login", async (req: Request, res: Response) => {
         password,
       });
       if (signInErr) {
-        // If supabase has user, enforce password check
-        if (!signInErr.message.includes("Invalid login credentials") && signInErr.message.includes("Email not confirmed")) {
-          // Allowed for development
-        } else if (signInErr.status === 400) {
-          return res.status(401).json({ error: "Invalid email or password." });
-        }
+        // Log but don't block — fall back to local DB auth
+        console.warn("[Login] Supabase auth note:", signInErr.message);
       }
       if (signInData?.session?.access_token) {
         authToken = signInData.session.access_token;

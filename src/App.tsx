@@ -93,7 +93,8 @@ function MainApp() {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="text-center space-y-3">
+        <div className="text-center space-y-4">
+          <img src="/logo.png" alt="Empress Oris Logo" className="w-20 h-20 mx-auto rounded-2xl object-contain shadow-lg" />
           <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-xs font-bold text-slate-300 tracking-wider uppercase">
             Connecting to Ghanaian Pharmacy System...
@@ -126,7 +127,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900 font-sans">
+    <div className="h-screen flex flex-col bg-slate-100 text-slate-900 font-sans overflow-hidden">
       {/* Global Top Navigation Bar */}
       <Navbar
         onOpenShiftClick={() => setIsOpenShiftOpen(true)}
@@ -140,7 +141,7 @@ function MainApp() {
       />
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
         <Sidebar
           currentTab={currentTab}

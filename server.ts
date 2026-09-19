@@ -1,3 +1,4 @@
+import "dotenv/config";
 import path from "path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
@@ -29,8 +30,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Empress Oris Herbal & Mart POS & Inventory Server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, "localhost", () => {
+    console.log(`Empress Oris Herbal & Mart POS & Inventory Server running on http://localhost:${PORT}`);
   });
 }
 

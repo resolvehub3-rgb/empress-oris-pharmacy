@@ -174,8 +174,8 @@ export function DashboardPage({
         />
       )}
 
-      {/* Empty Database Prompt if 0 products */}
-      {isDatabaseEmpty && (
+      {/* Empty Database Prompt if 0 products — Owner only */}
+      {isDatabaseEmpty && user?.role === "OWNER" && (
         <div className="p-5 sm:p-8 rounded-2xl sm:rounded-3xl bg-teal-900 text-white border border-teal-700 shadow-lg relative overflow-hidden">
           <div className="max-w-2xl relative z-10 space-y-3">
             <span className="px-3 py-1 bg-teal-800 text-teal-200 text-xs font-bold rounded-full uppercase tracking-wider">

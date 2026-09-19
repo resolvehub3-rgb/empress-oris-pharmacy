@@ -36,7 +36,7 @@ export function Navbar({
   const { user, settings, logout } = useAuth();
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+    <header className="h-16 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between shrink-0 z-30 shadow-2xs">
       {/* Left: Mobile Menu Toggle & Pharmacy Brand */}
       <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
         {onToggleMobileMenu && (
@@ -57,9 +57,7 @@ export function Navbar({
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-contain border border-slate-200 p-0.5 bg-white shrink-0"
           />
         ) : (
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-xs shrink-0">
-            EO
-          </div>
+          <img src="/logo.png" alt="Empress Oris Logo" className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-contain shadow-xs shrink-0" />
         )}
         <div className="min-w-0">
           <div className="flex items-center space-x-1.5 sm:space-x-2">

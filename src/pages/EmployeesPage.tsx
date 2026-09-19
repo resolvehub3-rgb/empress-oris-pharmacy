@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Users, Plus, Shield, Mail, Phone, Lock, CheckCircle2, UserCheck } from "lucide-react";
+import { Users, Plus, Shield, Mail, Phone, Lock, CheckCircle2, UserCheck, Trash2 } from "lucide-react";
 import { User } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function EmployeesPage() {
   const { user } = useAuth();
@@ -15,6 +16,7 @@ export function EmployeesPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
   const [role, setRole] = useState<"EMPLOYEE" | "OWNER">("EMPLOYEE");
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,6 +34,16 @@ export function EmployeesPage() {
 
   useEffect(() => {
     fetchEmployees();
+
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "EMPLOYEE_DELETED" || event === "EMPLOYEE_CREATED" || event === "EMPLOYEE_STATUS_CHANGED") {
+        fetchEmployees();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleCreateEmployee = async (e: React.FormEvent) => {
@@ -47,6 +59,7 @@ export function EmployeesPage() {
           password,
           fullName: fullName.trim(),
           phone: phone.trim() || null,
+          employeeCode: employeeCode.trim() || `EMP-${Date.now().toString(36).toUpperCase()}`,
           role,
         }),
       });
@@ -55,11 +68,23 @@ export function EmployeesPage() {
       setPassword("");
       setFullName("");
       setPhone("");
+      setEmployeeCode("");
       fetchEmployees();
     } catch (err: any) {
       alert("Failed to create employee: " + err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteEmployee = async (emp: User) => {
+    if (!confirm(`Delete "${emp.fullName}" (${emp.email})? This cannot be undone.`)) return;
+
+    try {
+      await apiRequest(`/api/employees/${emp.id}`, { method: "DELETE" });
+      fetchEmployees();
+    } catch (err: any) {
+      alert("Failed to delete employee: " + err.message);
     }
   };
 
@@ -132,6 +157,18 @@ export function EmployeesPage() {
                   </div>
                 )}
               </div>
+
+              {user?.role === "OWNER" && emp.id !== user?.id && (
+                <div className="pt-2 border-t border-slate-100 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteEmployee(emp)}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg transition flex items-center space-x-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}
@@ -180,6 +217,17 @@ export function EmployeesPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Employee Code *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. EMP-001 (auto-generated if empty)"
+                  value={employeeCode}
+                  onChange={(e) => setEmployeeCode(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl font-mono"
                 />
               </div>
 

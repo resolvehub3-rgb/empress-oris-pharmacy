@@ -62,7 +62,7 @@ export function InstallAppModal({ isOpen, onClose }: InstallAppModalProps) {
 
           <div className="flex items-start sm:items-center space-x-3 sm:space-x-4">
             <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white p-1.5 shadow-md shrink-0 flex items-center justify-center">
-              <img src="/icon.svg" alt="Empress Oris Logo" className="w-full h-full object-contain" />
+              <img src="/logo.png" alt="Empress Oris Logo" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">

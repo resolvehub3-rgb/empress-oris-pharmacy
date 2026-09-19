@@ -99,7 +99,7 @@ export function CameraScannerModal({
         setLastFoundProduct(found);
         setScanCount((prev) => prev + 1);
 
-        const available = found.totalStock ?? (found as any).available_stock ?? 0;
+        const available = found.totalStock ?? (found as any).total_stock ?? (found as any).available_stock ?? 0;
         if (available <= 0) {
           setScanMessage({
             type: "error",

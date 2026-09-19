@@ -46,6 +46,7 @@ function MainApp() {
   const [selectedProductForStock, setSelectedProductForStock] = useState<Product | undefined>(undefined);
   const [isOpenShiftOpen, setIsOpenShiftOpen] = useState(false);
   const [isCloseShiftOpen, setIsCloseShiftOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // Fetch reference data and active shift
   const fetchAuxData = async () => {
@@ -135,6 +136,7 @@ function MainApp() {
         notificationCount={unreadNotifications}
         onNotificationsClick={() => setCurrentTab("notifications")}
         onAddProductClick={() => setIsAddProductOpen(true)}
+        onToggleMobileMenu={() => setIsMobileNavOpen((prev) => !prev)}
       />
 
       {/* Main Workspace Layout */}
@@ -142,10 +144,15 @@ function MainApp() {
         {/* Sidebar */}
         <Sidebar
           currentTab={currentTab}
-          onSelectTab={setCurrentTab}
+          onSelectTab={(tab) => {
+            setCurrentTab(tab);
+            setIsMobileNavOpen(false);
+          }}
           notificationCount={unreadNotifications}
           lowStockCount={lowStockCount}
           expiringSoonCount={expiringSoonCount}
+          isMobileOpen={isMobileNavOpen}
+          onCloseMobile={() => setIsMobileNavOpen(false)}
         />
 
         {/* Content View Container */}

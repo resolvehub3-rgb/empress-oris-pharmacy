@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#042f2e" />
+      <stop offset="50%" stop-color="#064e3b" />
+      <stop offset="100%" stop-color="#022c22" />
+    </linearGradient>
+    <linearGradient id="crossGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background Rounded Rect -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Subtle Inner Border -->
+  <rect x="16" y="16" width="480" height="480" rx="98" fill="none" stroke="#10b981" stroke-width="3" stroke-opacity="0.3" />
+
+  <!-- Pharmacy Cross & Botanical Herbal Center -->
+  <g filter="url(#glow)">
+    <!-- Modern Styled Pharmacy Cross -->
+    <path d="M 216 112 H 296 C 304.8 112 312 119.2 312 128 V 216 H 400 C 408.8 216 416 223.2 416 232 V 280 C 416 288.8 408.8 296 400 296 H 312 V 384 C 312 392.8 304.8 400 296 400 H 216 C 207.2 400 200 392.8 200 384 V 296 H 112 C 103.2 296 96 288.8 96 280 V 232 C 96 223.2 103.2 216 112 216 H 200 V 128 C 200 119.2 207.2 112 216 112 Z" fill="url(#crossGrad)" />
+  </g>
+
+  <!-- Golden Herbal Leaf / Botanical Crest in the center -->
+  <g transform="translate(256, 256)">
+    <!-- Leaf 1 (Up-Right) -->
+    <path d="M 0 0 C 25 -45 65 -55 85 -50 C 90 -25 75 25 0 0 Z" fill="url(#goldGrad)" opacity="0.95" />
+    <!-- Leaf 2 (Down-Left) -->
+    <path d="M 0 0 C -25 45 -65 55 -85 50 C -90 25 -75 -25 0 0 Z" fill="url(#goldGrad)" opacity="0.9" />
+    <!-- Center Core Spark -->
+    <circle cx="0" cy="0" r="14" fill="#ffffff" />
+    <circle cx="0" cy="0" r="8" fill="#065f46" />
+  </g>
+
+  <!-- Star Accent -->
+  <path d="M 256 80 L 260 92 L 272 96 L 260 100 L 256 112 L 252 100 L 240 96 L 252 92 Z" fill="#fbbf24" />
+</svg>

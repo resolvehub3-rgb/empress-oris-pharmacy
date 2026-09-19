@@ -467,6 +467,46 @@ Follow this procedure to test and verify the live visual low stock notification 
 
 ---
 
+## Native Desktop App (PWA) for Employees & Administrators
+
+The application is engineered as a **Progressive Web Application (PWA)**, allowing it to run as a native desktop or mobile application without needing third-party wrapper runtimes.
+
+### Key Benefits
+- **Dedicated Native Window**: Opens in a standalone, clean window without browser address bars, tabs, or navigation buttons.
+- **Taskbar / Dock Integration**: Pin Empress Oris directly to the Windows Taskbar, macOS Dock, or Linux application launcher.
+- **Role Support**: Both **Administrators** (for dashboard metrics, inventory valuation, stock receiving) and **Employees/Cashiers** (for full-screen POS terminal checkout and barcode scanning) can install and run the app natively.
+- **Application Shortcuts**: Right-click the app icon on your desktop or dock to launch directly into **POS Terminal**, **Dashboard**, or **Products Catalog**.
+- **Hardware Acceleration**: Full access to attached USB thermal receipt printers, USB laser barcode scanners, and webcams for barcode scanning.
+
+### How to Install
+
+#### Windows (Chrome / Edge / Brave):
+1. Navigate to the application URL in Google Chrome or Microsoft Edge.
+2. Click the **"Install App"** / **"Desktop App"** button located in the top navigation bar, sidebar, or dashboard banner.
+3. Alternatively, click the install icon in the browser address bar (top right `⊕` or computer icon).
+4. Click **"Install"** on the prompt. Empress Oris will launch in its own native desktop window with a desktop shortcut created automatically.
+
+#### macOS (Chrome / Safari / Edge):
+1. Open the application in Chrome, Edge, or Safari (macOS Sonoma 14+).
+2. Click the **"Install App"** button or select **File > Add to Dock** in Safari.
+3. Click **"Install"**. The app will be placed in your `Applications` folder and macOS Dock.
+
+#### Mobile (Android & iOS):
+- **Android (Chrome)**: Tap the "Download App" button or tap Chrome menu `⋮` > **"Add to Home screen"** / **"Install app"**.
+- **iPhone / iPad (Safari)**: Tap the Share button `⎋` > **"Add to Home Screen"** > **"Add"**.
+
+---
+
+## Mobile Responsive Architecture
+
+The Admin Dashboard and operational views are fully responsive across smartphones, tablets, and desktop workstations:
+- **Off-Canvas Navigation Drawer**: On mobile viewports (`< 1024px`), navigation collapses into a smooth slide-out drawer accessible via the hamburger menu button in the top bar.
+- **Mobile-Optimized KPI Metric Cards**: High-density 2-column mobile layout displaying sales, revenue, stock valuation, and gross margins without excessive vertical scrolling.
+- **Touch-Friendly POS & Alerts**: 44px+ touch targets, responsive pill filters, and card-based transaction feeds replacing wide desktop tables on small screens.
+- **Dynamic Viewport Padding**: Fluid spacing (`p-3.5` on mobile to `p-8` on desktop) ensuring maximum screen real estate for cashiers and pharmacists.
+
+---
+
 ## Production Deployment
 
 ### Container / Cloud Run Deployment

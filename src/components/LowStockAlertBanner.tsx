@@ -147,8 +147,8 @@ export function LowStockAlertBanner({
         <div className="p-4 sm:p-5 space-y-3.5 bg-amber-50/60">
           {/* Subheader Filters */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/80 pb-3">
-            <div className="flex items-center space-x-1.5">
-              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider">Filter:</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider mr-1">Filter:</span>
               <button
                 onClick={() => setFilter("ALL")}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${

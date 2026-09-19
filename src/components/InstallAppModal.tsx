@@ -338,7 +338,7 @@ export function InstallAppModal({ isOpen, onClose }: InstallAppModalProps) {
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <div className="text-[11px] text-slate-500 flex items-center space-x-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>Secure PWA Native Architecture • Supabase PostgreSQL</span>
+            <span>Secure PWA Native Architecture • SamTeck Digital Team</span>
           </div>
           <button
             onClick={onClose}

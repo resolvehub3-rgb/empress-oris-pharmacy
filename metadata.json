@@ -1,0 +1,8 @@
+{
+  "name": "Empress Oris Herbal & Mart",
+  "description": "Production-ready Pharmacy, Herbal & Mart POS and Inventory Management System with batch tracking, FEFO, real-time stock, and integrated product & initial stock creation.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

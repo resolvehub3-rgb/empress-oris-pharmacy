@@ -3287,7 +3287,7 @@ function createExpressApp() {
   return app2;
 }
 
-// api/index.ts
+// api-src/index.ts
 var app = createExpressApp();
 var index_default = app;
 export {

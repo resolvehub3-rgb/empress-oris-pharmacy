@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "vercel-build": "vite build && esbuild api/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.mjs --external:sharp --external:@img --external:react --external:react-dom --external:lucide-react --external:motion --external:html5-qrcode --external:jsbarcode --external:tailwindcss --external:autoprefixer",
+    "vercel-build": "vite build && esbuild api-src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.mjs --external:sharp --external:@img --external:react --external:react-dom --external:lucide-react --external:motion --external:html5-qrcode --external:jsbarcode --external:tailwindcss --external:autoprefixer",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

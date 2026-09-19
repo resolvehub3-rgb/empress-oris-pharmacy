@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Clock, CheckCircle2, AlertCircle, DollarSign, Calculator, XCircle } from "lucide-react";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 interface ShiftsPageProps {
   onOpenShiftClick: () => void;
@@ -15,9 +16,8 @@ export function ShiftsPage({ onOpenShiftClick, onCloseShiftClick, hasOpenShift }
   const [loading, setLoading] = useState(true);
 
   const fetchShifts = async () => {
-    setLoading(true);
     try {
-      const res = await apiRequest<{ shifts: any[] }>("/api/shifts");
+      const res = await apiRequest<{ shifts: any[] }>("/api/shifts/history");
       setShifts(res.shifts || []);
     } catch (err) {
       console.warn("[ShiftsPage] Error:", err);
@@ -28,6 +28,12 @@ export function ShiftsPage({ onOpenShiftClick, onCloseShiftClick, hasOpenShift }
 
   useEffect(() => {
     fetchShifts();
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "SHIFT_UPDATED" || event === "EMPLOYEE_DELETED") {
+        fetchShifts();
+      }
+    });
+    return () => { unsubscribe(); };
   }, []);
 
   const handleForceClose = async (shiftId: string) => {

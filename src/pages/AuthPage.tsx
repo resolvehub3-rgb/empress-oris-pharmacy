@@ -123,7 +123,7 @@ export function AuthPage() {
             <span>Currency: <strong>GH₵ (Ghana Cedis)</strong></span>
             <span className="flex items-center space-x-1 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Supabase DB</span>
+              <span>SamTeck Digital Team</span>
             </span>
           </div>
         </div>

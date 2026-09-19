@@ -87,6 +87,9 @@ authRouter.post("/setup-owner", async (req: Request, res: Response) => {
   }
 
   try {
+    // Ensure schema exists before querying
+    await runSchemaInit().catch(() => {});
+
     // Check if an owner already exists
     const existingUsers = await db.select().from(schema.users);
     const existingOwner = existingUsers.find((u) => u.role === "OWNER");

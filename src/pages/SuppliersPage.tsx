@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Truck, Plus, Phone, Mail, MapPin, Search } from "lucide-react";
+import { Truck, Plus, Phone, Mail, MapPin, Trash2 } from "lucide-react";
 import { Supplier } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function SuppliersPage() {
   const { user } = useAuth();
@@ -17,6 +18,7 @@ export function SuppliersPage() {
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchSuppliers = async () => {
     setLoading(true);
@@ -32,6 +34,16 @@ export function SuppliersPage() {
 
   useEffect(() => {
     fetchSuppliers();
+
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "SUPPLIER_CREATED" || event === "SUPPLIER_DELETED") {
+        fetchSuppliers();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleCreateSupplier = async (e: React.FormEvent) => {
@@ -64,6 +76,20 @@ export function SuppliersPage() {
     }
   };
 
+  const handleDeleteSupplier = async (supplier: Supplier) => {
+    if (!confirm(`Delete "${supplier.name}"? This cannot be undone.`)) return;
+
+    setDeletingId(supplier.id);
+    try {
+      await apiRequest(`/api/suppliers/${supplier.id}`, { method: "DELETE" });
+      fetchSuppliers();
+    } catch (err: any) {
+      alert("Failed to delete supplier: " + err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs">
@@ -76,7 +102,7 @@ export function SuppliersPage() {
           </p>
         </div>
 
-        {user?.role === "OWNER" && (
+        {(user?.role === "OWNER" || user?.role === "ADMIN") && (
           <button
             onClick={() => setShowAddModal(true)}
             className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center space-x-2"
@@ -134,6 +160,23 @@ export function SuppliersPage() {
                   </div>
                 )}
               </div>
+
+              {(user?.role === "OWNER" || user?.role === "ADMIN") && (
+                <div className="pt-2 border-t border-slate-100 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteSupplier(s)}
+                    disabled={deletingId === s.id}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg transition flex items-center space-x-1 disabled:opacity-50"
+                  >
+                    {deletingId === s.id ? (
+                      <div className="w-3.5 h-3.5 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>{deletingId === s.id ? "Deleting..." : "Delete"}</span>
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}

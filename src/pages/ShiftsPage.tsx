@@ -177,7 +177,7 @@ export function ShiftsPage({ onOpenShiftClick, onCloseShiftClick, hasOpenShift }
                         >
                           {s.status}
                         </span>
-                        {s.status === "OPEN" && user?.role === "OWNER" && (
+                        {s.status === "OPEN" && (user?.role === "OWNER" || user?.role === "ADMIN") && (
                           <button
                             onClick={() => handleForceClose(s.id)}
                             className="ml-2 px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 text-[10px] font-bold rounded transition inline-flex items-center space-x-0.5"

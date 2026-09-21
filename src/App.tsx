@@ -52,25 +52,21 @@ function MainApp() {
   const fetchAuxData = async () => {
     if (!user) return;
 
-    try {
-      const [catsRes, suppsRes, shiftRes, notifRes, statsRes] = await Promise.all([
-        apiRequest<{ categories: Category[] }>("/api/categories"),
-        apiRequest<{ suppliers: Supplier[] }>("/api/suppliers"),
-        apiRequest<{ shift: any }>("/api/shifts/current"),
-        apiRequest<{ count: number }>("/api/notifications/unread-count"),
-        apiRequest<any>("/api/reports/dashboard"),
-      ]);
+    const [catsResult, suppsResult, shiftResult, notifResult, statsResult] = await Promise.allSettled([
+      apiRequest<{ categories: Category[] }>("/api/categories"),
+      apiRequest<{ suppliers: Supplier[] }>("/api/suppliers"),
+      apiRequest<{ shift: any }>("/api/shifts/current"),
+      apiRequest<{ count: number }>("/api/notifications/unread-count"),
+      apiRequest<any>("/api/reports/dashboard"),
+    ]);
 
-      setCategories(catsRes.categories || []);
-      setSuppliers(suppsRes.suppliers || []);
-      setActiveShift(shiftRes.shift || null);
-      setUnreadNotifications(notifRes.count || 0);
-      if (statsRes?.inventory) {
-        setLowStockCount(statsRes.inventory.lowStockCount || 0);
-        setExpiringSoonCount(statsRes.inventory.expiringSoonCount || 0);
-      }
-    } catch (err) {
-      console.warn("[App Aux Data] Warning:", err);
+    if (catsResult.status === "fulfilled") setCategories(catsResult.value.categories || []);
+    if (suppsResult.status === "fulfilled") setSuppliers(suppsResult.value.suppliers || []);
+    if (shiftResult.status === "fulfilled") setActiveShift(shiftResult.value.shift || null);
+    if (notifResult.status === "fulfilled") setUnreadNotifications(notifResult.value.count || 0);
+    if (statsResult.status === "fulfilled" && statsResult.value?.inventory) {
+      setLowStockCount(statsResult.value.inventory.lowStockCount || 0);
+      setExpiringSoonCount(statsResult.value.inventory.expiringSoonCount || 0);
     }
   };
 

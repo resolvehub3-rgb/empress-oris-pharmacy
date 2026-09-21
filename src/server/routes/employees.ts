@@ -48,9 +48,15 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER", "ADMIN"])
   }
 
   try {
+    const [existing] = await rawSql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+    if (existing) {
+      return res.status(400).json({ error: "An employee with this email already exists." });
+    }
+
+    let supabaseUserId: string | null = null;
     const supabase = getSupabase();
     if (supabase && password) {
-      await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -60,18 +66,38 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER", "ADMIN"])
           },
         },
       });
+      if (error) {
+        return res.status(400).json({ error: error.message || "Failed to create auth account." });
+      }
+      supabaseUserId = data.user?.id || null;
     }
 
     const result = await rawSql.begin(async (tx) => {
-      const [user] = await tx`
-        INSERT INTO users (email, full_name, phone, role, status)
-        VALUES (${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
-        RETURNING *
-      `;
+      let user;
+      if (supabaseUserId) {
+        const [existingUser] = await tx`SELECT id FROM users WHERE id = ${supabaseUserId} LIMIT 1`;
+        if (existingUser) {
+          await tx`UPDATE users SET full_name = ${fullName}, phone = ${phone || null}, status = 'ACTIVE', updated_at = NOW() WHERE id = ${supabaseUserId}`;
+          [user] = await tx`SELECT * FROM users WHERE id = ${supabaseUserId}`;
+        } else {
+          [user] = await tx`
+            INSERT INTO users (id, email, full_name, phone, role, status)
+            VALUES (${supabaseUserId}, ${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
+            RETURNING *
+          `;
+        }
+      } else {
+        [user] = await tx`
+          INSERT INTO users (email, full_name, phone, role, status)
+          VALUES (${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
+          RETURNING *
+        `;
+      }
 
       const [profile] = await tx`
         INSERT INTO employee_profiles (user_id, employee_code, position, hire_date, is_active)
         VALUES (${user.id}, ${employeeCode}, ${position || "Cashier"}, CURRENT_DATE, true)
+        ON CONFLICT (user_id) DO UPDATE SET employee_code = ${employeeCode}, position = ${position || "Cashier"}, is_active = true
         RETURNING *
       `;
 
@@ -144,6 +170,7 @@ employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER", "ADM
       const [targetUser] = await tx`SELECT id, email, full_name, role FROM users WHERE id = ${id}`;
       if (!targetUser) throw new Error("Employee not found.");
 
+      await tx`UPDATE cashier_shifts SET status = 'CLOSED', end_time = NOW() WHERE cashier_id = ${id} AND status = 'OPEN'`;
       await tx`UPDATE users SET status = 'INACTIVE', updated_at = NOW() WHERE id = ${id}`;
       await tx`UPDATE employee_profiles SET is_active = false WHERE user_id = ${id}`;
 

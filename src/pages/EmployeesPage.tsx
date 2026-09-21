@@ -19,6 +19,7 @@ export function EmployeesPage() {
   const [employeeCode, setEmployeeCode] = useState("");
   const [role, setRole] = useState<"EMPLOYEE" | "ADMIN" | "OWNER">("EMPLOYEE");
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -80,11 +81,14 @@ export function EmployeesPage() {
   const handleDeleteEmployee = async (emp: User) => {
     if (!confirm(`Delete "${emp.fullName}" (${emp.email})? This cannot be undone.`)) return;
 
+    setDeletingId(emp.id);
     try {
       await apiRequest(`/api/employees/${emp.id}`, { method: "DELETE" });
       fetchEmployees();
     } catch (err: any) {
       alert("Failed to delete employee: " + err.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -162,10 +166,15 @@ export function EmployeesPage() {
                 <div className="pt-2 border-t border-slate-100 flex justify-end">
                   <button
                     onClick={() => handleDeleteEmployee(emp)}
-                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg transition flex items-center space-x-1"
+                    disabled={deletingId === emp.id}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg transition flex items-center space-x-1 disabled:opacity-50"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete</span>
+                    {deletingId === emp.id ? (
+                      <div className="w-3.5 h-3.5 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>{deletingId === emp.id ? "Deleting..." : "Delete"}</span>
                   </button>
                 </div>
               )}

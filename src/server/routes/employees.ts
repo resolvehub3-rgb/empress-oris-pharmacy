@@ -15,18 +15,19 @@ employeesRouter.get("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]),
       SELECT 
         u.id,
         u.email,
-        u.full_name,
+        u.full_name AS "fullName",
         u.phone,
         u.role,
         u.status,
-        u.created_at,
-        ep.employee_code,
+        u.created_at AS "createdAt",
+        ep.employee_code AS "employeeCode",
         ep.position,
-        ep.hire_date,
+        ep.hire_date AS "hireDate",
         ep.permissions,
-        ep.is_active as profile_active
+        ep.is_active AS "profileActive"
       FROM users u
       LEFT JOIN employee_profiles ep ON u.id = ep.user_id
+      WHERE u.status = 'ACTIVE'
       ORDER BY u.created_at ASC
     `);
 

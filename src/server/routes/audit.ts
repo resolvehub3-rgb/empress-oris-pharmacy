@@ -4,7 +4,7 @@ import { requireAuthentication, requireRole } from "../middleware/auth";
 
 export const auditRouter = Router();
 
-auditRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+auditRouter.get("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 

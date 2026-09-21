@@ -5,7 +5,7 @@ import { requireAuthentication, requireRole } from "../middleware/auth";
 export const reportsRouter = Router();
 
 // Owner Dashboard real statistics
-reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
@@ -96,7 +96,7 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), a
     const [shiftsData] = await rawSql.unsafe(`
       SELECT 
         (SELECT COUNT(*)::integer FROM users WHERE role = 'EMPLOYEE' AND status = 'ACTIVE') as active_employees,
-        (SELECT COUNT(*)::integer FROM cashier_shifts WHERE status = 'OPEN') as open_shifts
+        (SELECT COUNT(*)::integer FROM cashier_shifts cs JOIN users u ON cs.cashier_id = u.id WHERE cs.status = 'OPEN' AND u.status = 'ACTIVE') as open_shifts
     `);
 
     // 5. Recent Transactions
@@ -162,7 +162,7 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), a
 });
 
 // Sales Report with breakdown by payment method and items
-reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 

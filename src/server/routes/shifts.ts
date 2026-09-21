@@ -110,7 +110,7 @@ shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Res
   }
 
   try {
-    const isOwner = req.user?.role === "OWNER";
+    const isOwner = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
 
     let activeShift;
     if (isOwner && shiftId) {
@@ -205,7 +205,7 @@ shiftsRouter.get("/history", requireAuthentication, async (req: Request, res: Re
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
   try {
-    const isOwner = req.user?.role === "OWNER";
+    const isOwner = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
     const userFilter = isOwner ? "" : `WHERE s.cashier_id = '${req.user?.id}'`;
 
     const query = `

@@ -6,7 +6,7 @@ import { getSupabase, broadcastRealtimeEvent } from "../../services/supabase";
 export const employeesRouter = Router();
 
 // List all employees (Owner only)
-employeesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+employeesRouter.get("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
@@ -37,7 +37,7 @@ employeesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (r
 });
 
 // Create an employee account (Owner only)
-employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+employeesRouter.post("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
@@ -93,7 +93,7 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
 });
 
 // Toggle employee status (Active / Inactive)
-employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
@@ -128,7 +128,7 @@ employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER"
 });
 
 // Delete an employee (Owner only) - soft-deletes by setting status to INACTIVE
-employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER"]), async (req: Request, res: Response) => {
+employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 

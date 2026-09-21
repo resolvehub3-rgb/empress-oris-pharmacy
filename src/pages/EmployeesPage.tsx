@@ -17,7 +17,7 @@ export function EmployeesPage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [employeeCode, setEmployeeCode] = useState("");
-  const [role, setRole] = useState<"EMPLOYEE" | "OWNER">("EMPLOYEE");
+  const [role, setRole] = useState<"EMPLOYEE" | "ADMIN" | "OWNER">("EMPLOYEE");
   const [submitting, setSubmitting] = useState(false);
 
   const fetchEmployees = async () => {
@@ -100,7 +100,7 @@ export function EmployeesPage() {
           </p>
         </div>
 
-        {user?.role === "OWNER" && (
+        {(user?.role === "OWNER" || user?.role === "ADMIN") && (
           <button
             onClick={() => setShowAddModal(true)}
             className="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center space-x-2"
@@ -158,7 +158,7 @@ export function EmployeesPage() {
                 )}
               </div>
 
-              {user?.role === "OWNER" && emp.id !== user?.id && (
+              {(user?.role === "OWNER" || user?.role === "ADMIN") && emp.id !== user?.id && (
                 <div className="pt-2 border-t border-slate-100 flex justify-end">
                   <button
                     onClick={() => handleDeleteEmployee(emp)}
@@ -239,6 +239,7 @@ export function EmployeesPage() {
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl font-bold"
                 >
                   <option value="EMPLOYEE">Cashier / Dispenser (POS & Sales only)</option>
+                  <option value="ADMIN">Admin (Employee Management)</option>
                   <option value="OWNER">Owner / Pharmacist (Full Access)</option>
                 </select>
               </div>

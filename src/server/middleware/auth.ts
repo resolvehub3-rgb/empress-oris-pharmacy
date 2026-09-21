@@ -7,7 +7,7 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   fullName: string;
-  role: "OWNER" | "EMPLOYEE";
+  role: "OWNER" | "ADMIN" | "EMPLOYEE";
   status: string;
 }
 
@@ -49,7 +49,7 @@ export async function requireAuthentication(
               id: found.id,
               email: found.email,
               fullName: found.fullName,
-              role: found.role as "OWNER" | "EMPLOYEE",
+              role: found.role as "OWNER" | "ADMIN" | "EMPLOYEE",
               status: found.status,
             };
             return next();
@@ -72,7 +72,7 @@ export async function requireAuthentication(
           id: user.id,
           email: user.email,
           fullName: user.fullName,
-          role: user.role as "OWNER" | "EMPLOYEE",
+          role: user.role as "OWNER" | "ADMIN" | "EMPLOYEE",
           status: user.status,
         };
         return next();
@@ -86,7 +86,7 @@ export async function requireAuthentication(
   }
 }
 
-export function requireRole(allowedRoles: Array<"OWNER" | "EMPLOYEE">) {
+export function requireRole(allowedRoles: Array<"OWNER" | "ADMIN" | "EMPLOYEE">) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required." });

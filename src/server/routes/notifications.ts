@@ -5,14 +5,13 @@ import { broadcastRealtimeEvent } from "../../services/supabase";
 
 export const notificationsRouter = Router();
 
-// Get real system notifications (Low stock, expiring soon batches, expired batches, shift discrepancies)
+// Sync dynamic alerts into notifications table and return all
 notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
   try {
-    // Dynamic real alerts from the database
-    // 1. Low stock items
+    // 1. Low stock items — upsert into notifications
     const lowStockItems = await rawSql.unsafe(`
       SELECT p.id, p.name, p.sku, p.reorder_level,
         COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as current_stock
@@ -25,7 +24,19 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
       LIMIT 10
     `);
 
-    // 2. Expiring soon batches (within 90 days)
+    for (const item of lowStockItems) {
+      const refId = `low-${item.id}`;
+      const title = item.current_stock === 0 ? `${item.name} is Out of Stock` : `${item.name} is Low on Stock`;
+      const message = `Current stock: ${item.current_stock} units (reorder at ${item.reorder_level}). SKU: ${item.sku}`;
+      const type = item.current_stock === 0 ? "OUT_OF_STOCK" : "LOW_STOCK";
+      await rawSql.unsafe(`
+        INSERT INTO notifications (title, message, type, reference_id, is_read)
+        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', '${type}', '${refId}', false)
+        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+      `);
+    }
+
+    // 2. Expiring soon batches — upsert into notifications
     const expiringBatches = await rawSql.unsafe(`
       SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name,
         (b.expiry_date - CURRENT_DATE)::integer as days_remaining
@@ -38,7 +49,18 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
       LIMIT 10
     `);
 
-    // 3. Expired batches
+    for (const item of expiringBatches) {
+      const refId = `exp-${item.id}`;
+      const title = `${item.product_name} — Batch ${item.batch_number} Expiring`;
+      const message = `Expires in ${item.days_remaining} days (${new Date(item.expiry_date).toLocaleDateString("en-GB")}). Qty: ${item.current_quantity}`;
+      await rawSql.unsafe(`
+        INSERT INTO notifications (title, message, type, reference_id, is_read)
+        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', 'EXPIRING_SOON', '${refId}', false)
+        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+      `);
+    }
+
+    // 3. Expired batches — upsert into notifications
     const expiredBatches = await rawSql.unsafe(`
       SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name
       FROM batches b
@@ -48,60 +70,39 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
       LIMIT 10
     `);
 
-    // 4. Stored notifications (e.g. shift discrepancies)
-    const storedNotifications = await rawSql.unsafe(`
-      SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20
+    for (const item of expiredBatches) {
+      const refId = `expired-${item.id}`;
+      const title = `${item.product_name} — Batch ${item.batch_number} Expired`;
+      const message = `Expired on ${new Date(item.expiry_date).toLocaleDateString("en-GB")}. Qty: ${item.current_quantity} units still in stock.`;
+      await rawSql.unsafe(`
+        INSERT INTO notifications (title, message, type, reference_id, is_read)
+        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', 'EXPIRED', '${refId}', false)
+        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+      `);
+    }
+
+    // 4. Return all notifications from the table
+    const allNotifications = await rawSql.unsafe(`
+      SELECT * FROM notifications ORDER BY is_read ASC, created_at DESC LIMIT 50
     `);
 
-    return res.json({
-      lowStock: lowStockItems,
-      expiringSoon: expiringBatches,
-      expired: expiredBatches,
-      stored: storedNotifications,
-      totalAlerts: lowStockItems.length + expiringBatches.length + expiredBatches.length,
-    });
+    return res.json({ notifications: allNotifications });
   } catch (err: any) {
+    console.error("[Notifications] Error:", err);
     return res.status(500).json({ error: err.message || "Failed to fetch notifications" });
   }
 });
 
-// Get total unread alerts count (low stock + expiring soon + unread stored notifications)
+// Get total unread alerts count
 notificationsRouter.get("/unread-count", requireAuthentication, async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ count: 0 });
 
   try {
-    const [counts] = await rawSql.unsafe(`
-      SELECT 
-        (
-          SELECT COUNT(*)::integer FROM (
-            SELECT p.id
-            FROM products p
-            LEFT JOIN batches b ON p.id = b.product_id
-            WHERE p.is_active = true
-            GROUP BY p.id, p.reorder_level
-            HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
-          ) ls
-        ) as low_stock_count,
-        (
-          SELECT COUNT(DISTINCT b.id)::integer
-          FROM batches b
-          WHERE b.current_quantity > 0 
-            AND b.expiry_date >= CURRENT_DATE 
-            AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
-        ) as expiring_soon_count,
-        (
-          SELECT COUNT(*)::integer FROM notifications WHERE is_read = false
-        ) as stored_unread_count
+    const [result] = await rawSql.unsafe(`
+      SELECT COUNT(*)::integer as count FROM notifications WHERE is_read = false
     `);
-
-    const total = (counts?.low_stock_count || 0) + (counts?.expiring_soon_count || 0) + (counts?.stored_unread_count || 0);
-    return res.json({ 
-      count: total,
-      lowStockCount: counts?.low_stock_count || 0,
-      expiringSoonCount: counts?.expiring_soon_count || 0,
-      storedUnreadCount: counts?.stored_unread_count || 0
-    });
+    return res.json({ count: result?.count || 0 });
   } catch (err: any) {
     return res.json({ count: 0 });
   }

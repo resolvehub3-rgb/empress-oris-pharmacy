@@ -296,7 +296,7 @@ export const notifications = pgTable("notifications", {
   title: text("title").notNull(),
   message: text("message").notNull(),
   type: text("type").notNull(), // 'LOW_STOCK' | 'EXPIRING_SOON' | 'EXPIRED' | 'SHIFT_DISCREPANCY' | 'INVENTORY_ALERT'
-  referenceId: text("reference_id"),
+  referenceId: text("reference_id").unique(),
   isRead: boolean("is_read").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

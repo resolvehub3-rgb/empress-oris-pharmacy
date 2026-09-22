@@ -288,7 +288,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   type TEXT NOT NULL,
-  reference_id TEXT,
+  reference_id TEXT UNIQUE,
   is_read BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -315,6 +315,12 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(produc
 CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales(receipt_number);
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read);
+
+-- Migration: add unique constraint on reference_id if missing
+DO $$ BEGIN
+  ALTER TABLE notifications ADD CONSTRAINT notifications_reference_id_unique UNIQUE (reference_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 `;
 
 export async function runSchemaInit() {

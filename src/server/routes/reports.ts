@@ -4,8 +4,12 @@ import { requireAuthentication, requireRole } from "../middleware/auth";
 
 export const reportsRouter = Router();
 
-// Owner Dashboard real statistics
-reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
+// Dashboard real statistics.
+// Employees/cashiers can load this (their "Daily Summary" cards), but profit
+// analytics - COGS, gross profit, net profit and margin - are only ever sent
+// to Owner/Admin sessions, so cashiers can never see them (not even in the
+// raw network response).
+reportsRouter.get("/dashboard", requireAuthentication, async (req: Request, res: Response) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
@@ -123,6 +127,20 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER", "AD
     const expenses = parseFloat(expensesData?.total_expenses || "0");
     const netProfit = grossProfit - expenses;
 
+    // Profit analytics are Owner/Admin only - never serialize them for employees.
+    const canViewProfit = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
+    const finance = canViewProfit
+      ? {
+          revenue: revenue.toFixed(2),
+          costOfGoodsSold: cogs.toFixed(2),
+          grossProfit: grossProfit.toFixed(2),
+          expenses: expenses.toFixed(2),
+          monthExpenses: expensesData?.month_expenses || "0.00",
+          netProfit: netProfit.toFixed(2),
+          grossMarginPercent: revenue > 0 ? ((grossProfit / revenue) * 100).toFixed(1) : "0.0",
+        }
+      : { revenue: revenue.toFixed(2) };
+
     return res.json({
       sales: {
         todaySales: salesMetrics?.today_sales || "0.00",
@@ -139,15 +157,7 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER", "AD
         expiringSoonCount: inventoryMetrics?.expiring_soon_count || 0,
         expiredBatchesCount: inventoryMetrics?.expired_batches_count || 0,
       },
-      finance: {
-        revenue: revenue.toFixed(2),
-        costOfGoodsSold: cogs.toFixed(2),
-        grossProfit: grossProfit.toFixed(2),
-        expenses: expenses.toFixed(2),
-        monthExpenses: expensesData?.month_expenses || "0.00",
-        netProfit: netProfit.toFixed(2),
-        grossMarginPercent: revenue > 0 ? ((grossProfit / revenue) * 100).toFixed(1) : "0.0",
-      },
+      finance,
       employees: {
         activeCount: shiftsData?.active_employees || 0,
         openShifts: shiftsData?.open_shifts || 0,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Bell, AlertTriangle, CalendarDays, CheckCircle2, Trash2 } from "lucide-react";
 import { Notification } from "../types";
 import { apiRequest } from "../lib/api";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -73,6 +74,16 @@ export function NotificationsPage() {
 
   useEffect(() => {
     fetchNotifications();
+
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "NOTIFICATION_UPDATED" || event === "STOCK_UPDATED" || event === "SHIFT_UPDATED") {
+        fetchNotifications();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const markAsRead = async (id: string) => {
@@ -88,6 +99,11 @@ export function NotificationsPage() {
 
   const markAllRead = async () => {
     setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
+    try {
+      await apiRequest("/api/notifications/read-all", { method: "PUT" });
+    } catch (err) {
+      console.warn(err);
+    }
   };
 
   return (

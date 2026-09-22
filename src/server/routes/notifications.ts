@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getRawSql } from "../../db";
 import { requireAuthentication } from "../middleware/auth";
+import { broadcastRealtimeEvent } from "../../services/supabase";
 
 export const notificationsRouter = Router();
 
@@ -103,5 +104,40 @@ notificationsRouter.get("/unread-count", requireAuthentication, async (req: Requ
     });
   } catch (err: any) {
     return res.json({ count: 0 });
+  }
+});
+
+// Mark a single notification as read
+notificationsRouter.put("/:id/read", requireAuthentication, async (req: Request, res: Response) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+
+  const { id } = req.params;
+
+  try {
+    const [updated] = await rawSql`
+      UPDATE notifications SET is_read = true WHERE id = ${id} RETURNING *
+    `;
+    if (!updated) {
+      return res.status(404).json({ error: "Notification not found." });
+    }
+    await broadcastRealtimeEvent("NOTIFICATION_UPDATED", { notificationId: id });
+    return res.json({ success: true, notification: updated });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to mark notification as read" });
+  }
+});
+
+// Mark all notifications as read
+notificationsRouter.put("/read-all", requireAuthentication, async (req: Request, res: Response) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+
+  try {
+    await rawSql`UPDATE notifications SET is_read = true WHERE is_read = false`;
+    await broadcastRealtimeEvent("NOTIFICATION_UPDATED", { action: "read_all" });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to mark all as read" });
   }
 });

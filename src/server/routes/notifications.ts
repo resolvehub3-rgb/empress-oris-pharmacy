@@ -11,74 +11,86 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
 
   try {
-    // 1. Low stock items — upsert into notifications
-    const lowStockItems = await rawSql.unsafe(`
-      SELECT p.id, p.name, p.sku, p.reorder_level,
-        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as current_stock
-      FROM products p
-      LEFT JOIN batches b ON p.id = b.product_id
-      WHERE p.is_active = true
-      GROUP BY p.id, p.name, p.sku, p.reorder_level
-      HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
-      ORDER BY current_stock ASC
-      LIMIT 10
-    `);
-
-    for (const item of lowStockItems) {
-      const refId = `low-${item.id}`;
-      const title = item.current_stock === 0 ? `${item.name} is Out of Stock` : `${item.name} is Low on Stock`;
-      const message = `Current stock: ${item.current_stock} units (reorder at ${item.reorder_level}). SKU: ${item.sku}`;
-      const type = item.current_stock === 0 ? "OUT_OF_STOCK" : "LOW_STOCK";
-      await rawSql.unsafe(`
-        INSERT INTO notifications (title, message, type, reference_id, is_read)
-        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', '${type}', '${refId}', false)
-        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+    // 1. Low stock items
+    try {
+      const lowStockItems = await rawSql.unsafe(`
+        SELECT p.id, p.name, p.sku, p.reorder_level,
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as current_stock
+        FROM products p
+        LEFT JOIN batches b ON p.id = b.product_id
+        WHERE p.is_active = true
+        GROUP BY p.id, p.name, p.sku, p.reorder_level
+        HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
+        ORDER BY current_stock ASC
+        LIMIT 10
       `);
+
+      for (const item of lowStockItems) {
+        const refId = `low-${item.id}`;
+        const title = item.current_stock === 0 ? `${item.name} is Out of Stock` : `${item.name} is Low on Stock`;
+        const message = `Current stock: ${item.current_stock} units (reorder at ${item.reorder_level}). SKU: ${item.sku}`;
+        const type = item.current_stock === 0 ? "OUT_OF_STOCK" : "LOW_STOCK";
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, $$${type}$$, $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Low stock upsert error:", err);
     }
 
-    // 2. Expiring soon batches — upsert into notifications
-    const expiringBatches = await rawSql.unsafe(`
-      SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name,
-        (b.expiry_date - CURRENT_DATE)::integer as days_remaining
-      FROM batches b
-      JOIN products p ON b.product_id = p.id
-      WHERE b.current_quantity > 0 
-        AND b.expiry_date >= CURRENT_DATE 
-        AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
-      ORDER BY b.expiry_date ASC
-      LIMIT 10
-    `);
-
-    for (const item of expiringBatches) {
-      const refId = `exp-${item.id}`;
-      const title = `${item.product_name} — Batch ${item.batch_number} Expiring`;
-      const message = `Expires in ${item.days_remaining} days (${new Date(item.expiry_date).toLocaleDateString("en-GB")}). Qty: ${item.current_quantity}`;
-      await rawSql.unsafe(`
-        INSERT INTO notifications (title, message, type, reference_id, is_read)
-        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', 'EXPIRING_SOON', '${refId}', false)
-        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+    // 2. Expiring soon batches
+    try {
+      const expiringBatches = await rawSql.unsafe(`
+        SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name,
+          (b.expiry_date - CURRENT_DATE)::integer as days_remaining
+        FROM batches b
+        JOIN products p ON b.product_id = p.id
+        WHERE b.current_quantity > 0 
+          AND b.expiry_date >= CURRENT_DATE 
+          AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
+        ORDER BY b.expiry_date ASC
+        LIMIT 10
       `);
+
+      for (const item of expiringBatches) {
+        const refId = `exp-${item.id}`;
+        const title = `${item.product_name} — Batch ${item.batch_number} Expiring`;
+        const message = `Expires in ${item.days_remaining} days (${new Date(item.expiry_date).toLocaleDateString("en-GB")}). Qty: ${item.current_quantity}`;
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, 'EXPIRING_SOON', $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Expiring batch upsert error:", err);
     }
 
-    // 3. Expired batches — upsert into notifications
-    const expiredBatches = await rawSql.unsafe(`
-      SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name
-      FROM batches b
-      JOIN products p ON b.product_id = p.id
-      WHERE b.current_quantity > 0 AND b.expiry_date < CURRENT_DATE
-      ORDER BY b.expiry_date DESC
-      LIMIT 10
-    `);
-
-    for (const item of expiredBatches) {
-      const refId = `expired-${item.id}`;
-      const title = `${item.product_name} — Batch ${item.batch_number} Expired`;
-      const message = `Expired on ${new Date(item.expiry_date).toLocaleDateString("en-GB")}. Qty: ${item.current_quantity} units still in stock.`;
-      await rawSql.unsafe(`
-        INSERT INTO notifications (title, message, type, reference_id, is_read)
-        VALUES ('${title.replace(/'/g, "''")}', '${message.replace(/'/g, "''")}', 'EXPIRED', '${refId}', false)
-        ON CONFLICT (reference_id) DO UPDATE SET title = '${title.replace(/'/g, "''")}', message = '${message.replace(/'/g, "''")}'
+    // 3. Expired batches
+    try {
+      const expiredBatches = await rawSql.unsafe(`
+        SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name
+        FROM batches b
+        JOIN products p ON b.product_id = p.id
+        WHERE b.current_quantity > 0 AND b.expiry_date < CURRENT_DATE
+        ORDER BY b.expiry_date DESC
+        LIMIT 10
       `);
+
+      for (const item of expiredBatches) {
+        const refId = `expired-${item.id}`;
+        const title = `${item.product_name} — Batch ${item.batch_number} Expired`;
+        const message = `Expired on ${new Date(item.expiry_date).toLocaleDateString("en-GB")}. Qty: ${item.current_quantity} units still in stock.`;
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, 'EXPIRED', $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Expired batch upsert error:", err);
     }
 
     // 4. Return all notifications from the table

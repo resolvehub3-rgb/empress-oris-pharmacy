@@ -60,7 +60,11 @@ export async function requireAuthentication(
 
     // Direct token check if token is user UUID or session key (for internal verified requests)
     const db = getDb();
-    if (db && token) {
+    // Postgres uuid columns reject non-UUID literals with 22P02, which would
+    // throw a DrizzleQueryError (and a full stack trace) for every malformed
+    // Bearer token. Cheap format check first; invalid tokens get a clean 401.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (db && token && UUID_RE.test(token)) {
       const [user] = await db
         .select()
         .from(schema.users)

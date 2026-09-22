@@ -85,14 +85,20 @@ export async function broadcastRealtimeEvent(
 
   try {
     const channel = supabase.channel("pharmacy-realtime");
-    await channel.send({
-      type: "broadcast",
-      event: eventType,
-      payload: {
-        ...payload,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    const message = {
+      ...payload,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      // Explicit REST delivery. The channel is intentionally never subscribed
+      // server-side, so channel.send() would hit its deprecated REST fallback
+      // and log a deprecation warning on every broadcast.
+      await channel.httpSend(eventType, message);
+    } catch (httpErr) {
+      // Realtime servers older than v2.97.0 have no per-event endpoint;
+      // fall back to the legacy batch send() so broadcasts keep working.
+      await channel.send({ type: "broadcast", event: eventType, payload: message });
+    }
   } catch (err) {
     console.error("[Supabase Realtime] Broadcast warning:", err);
   }

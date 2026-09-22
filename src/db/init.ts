@@ -338,9 +338,19 @@ CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_product_imports_created_at ON product_imports(created_at DESC);
 
 -- Migration: add unique constraint on reference_id if missing
+-- Guard on pg_constraint first: re-running ALTER TABLE ... UNIQUE on an
+-- already-constrained column makes Postgres try to re-create the backing
+-- index and fail with 42P07 (relation already exists), which aborted the
+-- whole schema init on every server start.
 DO $$ BEGIN
-  ALTER TABLE notifications ADD CONSTRAINT notifications_reference_id_unique UNIQUE (reference_id);
-EXCEPTION WHEN duplicate_object THEN NULL;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'notifications'::regclass
+      AND conname = 'notifications_reference_id_unique'
+  ) THEN
+    ALTER TABLE notifications ADD CONSTRAINT notifications_reference_id_unique UNIQUE (reference_id);
+  END IF;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 `;
 

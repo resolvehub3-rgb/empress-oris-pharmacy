@@ -37,6 +37,8 @@ export function ReceiptModal({ isOpen, onClose, receiptData }: ReceiptModalProps
     transactionReference,
   } = receiptData;
 
+  const resolvedLogo = logoUrl || "/logo.png";
+
   const formattedDate = new Date(date).toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
@@ -73,7 +75,7 @@ export function ReceiptModal({ isOpen, onClose, receiptData }: ReceiptModalProps
           {/* Pharmacy Branding */}
           <div className="text-center space-y-1 border-b border-dashed border-slate-300 pb-3">
             {logoUrl && (
-              <img src={logoUrl} alt="Logo" className="w-12 h-12 mx-auto rounded-full object-contain mb-1" />
+              <img src={resolvedLogo} alt="Logo" className="w-12 h-12 mx-auto rounded-full object-contain mb-1" />
             )}
             <h1 className="text-sm font-black uppercase tracking-wider text-slate-900">{pharmacyName}</h1>
             <p className="text-[11px] text-slate-600 flex items-center justify-center space-x-1">
@@ -193,7 +195,7 @@ export function ReceiptModal({ isOpen, onClose, receiptData }: ReceiptModalProps
 
         {/* Modal Action Footer - Hidden during print */}
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center print:hidden">
-          <span className="text-xs text-slate-500">Printed via Empress Oris POS</span>
+          <span className="text-xs text-slate-500">Printed via SamTeck Digital POS</span>
           <div className="space-x-2">
             <button
               onClick={onClose}

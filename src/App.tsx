@@ -181,6 +181,7 @@ function MainApp() {
               onAddProductClick={() => setIsAddProductOpen(true)}
               onAddStockClick={handleOpenAddStock}
               categories={categories}
+              onDataChanged={fetchAuxData}
             />
           )}
 

@@ -313,6 +313,33 @@ export const auditLogs = pgTable("audit_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// 23. Product Excel Imports (Import History)
+export const productImports = pgTable("product_imports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  fileName: text("file_name").notNull(),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  mode: text("mode").notNull().default("ADD_NEW"), // 'ADD_NEW' (update modes are not enabled)
+  totalRows: integer("total_rows").notNull().default(0),
+  importedRows: integer("imported_rows").notNull().default(0),
+  duplicateRows: integer("duplicate_rows").notNull().default(0),
+  failedRows: integer("failed_rows").notNull().default(0),
+  stockRows: integer("stock_rows").notNull().default(0),
+  batchesCreated: integer("batches_created").notNull().default(0),
+  movementsCreated: integer("movements_created").notNull().default(0),
+  categoriesCreated: integer("categories_created").notNull().default(0),
+  status: text("status").notNull().default("COMPLETED"), // 'COMPLETED' | 'FAILED'
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const productImportsRelations = relations(productImports, ({ one }) => ({
+  uploadedByUser: one(users, {
+    fields: [productImports.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
 // Relations
 export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(categories, {

@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { authRouter } from "./routes/auth";
+import { importRouter } from "./routes/import";
 import { productsRouter } from "./routes/products";
 import { stockRouter } from "./routes/stock";
 import { posRouter } from "./routes/pos";
@@ -41,6 +42,7 @@ export function createExpressApp() {
 
   // Mount API modules
   app.use("/api/auth", authRouter);
+  app.use("/api/products/import", importRouter);
   app.use("/api/products", productsRouter);
   app.use("/api/stock", stockRouter);
   app.use("/api/pos", posRouter);

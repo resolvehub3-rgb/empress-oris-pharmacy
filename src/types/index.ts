@@ -266,3 +266,92 @@ export interface PurchaseOrder {
   createdAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Excel Product Import
+// ---------------------------------------------------------------------------
+
+export type ImportRowStatus = "READY" | "DUPLICATE" | "INVALID";
+
+export interface ImportPreviewRow {
+  rowNumber: number;
+  status: ImportRowStatus;
+  name: string | null;
+  sku: string | null;
+  barcode: string | null;
+  categoryName: string | null;
+  sellingPrice: number | null;
+  costPrice: number | null;
+  initialQuantity: number;
+  hasStock: boolean;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  supplierName: string | null;
+  errors: string[];
+  warnings: string[];
+  notes: string[];
+}
+
+export interface ImportPreviewSummary {
+  totalRows: number;
+  readyCount: number;
+  duplicateCount: number;
+  invalidCount: number;
+  withStockCount: number;
+  withoutStockCount: number;
+  skuGeneratedCount: number;
+  expiredBatchCount: number;
+  newCategories: string[];
+}
+
+export interface ImportPreviewResult {
+  fileName: string;
+  sheetName: string;
+  headerRowNumber: number;
+  mode: "ADD_NEW";
+  fileSizeBytes: number;
+  maxRows: number;
+  maxFileBytes: number;
+  skippedBlankRows: number;
+  unmappedColumns: string[];
+  summary: ImportPreviewSummary;
+  rows: ImportPreviewRow[];
+}
+
+export interface ImportConfirmResult {
+  importId: string;
+  fileName: string;
+  mode: "ADD_NEW";
+  totalRows: number;
+  imported: number;
+  duplicates: number;
+  invalid: number;
+  productsCreated: number;
+  batchesCreated: number;
+  movementsCreated: number;
+  categoriesCreated: number;
+  withStock: number;
+  withoutStock: number;
+  completedAt: string;
+}
+
+export interface ImportHistoryItem {
+  id: string;
+  fileName: string;
+  mode: string;
+  uploadedBy: string | null;
+  uploadedByName: string | null;
+  totalRows: number;
+  importedRows: number;
+  duplicateRows: number;
+  failedRows: number;
+  stockRows: number;
+  batchesCreated: number;
+  movementsCreated: number;
+  categoriesCreated: number;
+  status: string;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+

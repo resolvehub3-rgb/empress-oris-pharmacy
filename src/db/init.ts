@@ -305,6 +305,26 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 23. Product Excel Imports (Import History)
+CREATE TABLE IF NOT EXISTS product_imports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_name TEXT NOT NULL,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  mode TEXT NOT NULL DEFAULT 'ADD_NEW',
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  imported_rows INTEGER NOT NULL DEFAULT 0,
+  duplicate_rows INTEGER NOT NULL DEFAULT 0,
+  failed_rows INTEGER NOT NULL DEFAULT 0,
+  stock_rows INTEGER NOT NULL DEFAULT 0,
+  batches_created INTEGER NOT NULL DEFAULT 0,
+  movements_created INTEGER NOT NULL DEFAULT 0,
+  categories_created INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'COMPLETED',
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
@@ -315,6 +335,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(produc
 CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales(receipt_number);
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_product_imports_created_at ON product_imports(created_at DESC);
 
 -- Migration: add unique constraint on reference_id if missing
 DO $$ BEGIN
@@ -337,7 +358,7 @@ export async function runSchemaInit() {
       SET name = 'Empress Oris Herbal & Mart' 
       WHERE name = 'HealthFirst Pharmacy' OR name = 'RxDispense Ghana' OR name ILIKE '%HealthFirst%';
     `).catch(() => {});
-    console.log("[DB Init] Successfully verified and initialized all 22 database tables!");
+    console.log("[DB Init] Successfully verified and initialized all 23 database tables!");
     return true;
   } catch (err) {
     console.error("[DB Init] Error running schema initialization:", err);

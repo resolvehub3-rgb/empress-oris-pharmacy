@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { History, ArrowDownLeft, ArrowUpRight, Filter, Search } from "lucide-react";
 import { StockMovement } from "../types";
 import { apiRequest } from "../lib/api";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function StockMovementsPage() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -24,6 +25,17 @@ export function StockMovementsPage() {
 
   useEffect(() => {
     fetchMovements();
+
+    // Supabase Realtime: imported INITIAL_STOCK movements appear without refresh.
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "PRODUCT_CREATED" || event === "STOCK_UPDATED") {
+        fetchMovements();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [selectedType]);
 
   return (

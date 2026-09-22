@@ -20,6 +20,7 @@ import {
 import { Product, CartItem, Category } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 import { ReceiptModal } from "../components/ReceiptModal";
 import { CameraScannerModal } from "../components/CameraScannerModal";
 
@@ -90,6 +91,23 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
     fetchProducts(searchQuery, selectedCategory);
     fetchCategories();
   }, [selectedCategory]);
+
+  // Keep the latest search parameters for the realtime refetch closure.
+  const searchParamsRef = useRef({ query: "", category: "" });
+  useEffect(() => {
+    searchParamsRef.current = { query: searchQuery, category: selectedCategory };
+  }, [searchQuery, selectedCategory]);
+
+  // Supabase Realtime: newly imported products and stock changes appear in the
+  // POS immediately - without any manual page reload.
+  useEffect(() => {
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "PRODUCT_CREATED" || event === "PRODUCT_UPDATED" || event === "STOCK_UPDATED") {
+        fetchProducts(searchParamsRef.current.query, searchParamsRef.current.category);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();

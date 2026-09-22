@@ -15,23 +15,28 @@ import {
   Barcode,
   Sparkles,
   Printer,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Product, Category, Supplier } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { BarcodePrintModal } from "../components/BarcodePrintModal";
+import { ImportProductsModal } from "../components/ImportProductsModal";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 interface ProductsPageProps {
   onAddProductClick: () => void;
   onAddStockClick: (product?: Product) => void;
   categories: Category[];
+  /** Refresh auxiliary data (categories/dashboard counts) after an import. */
+  onDataChanged?: () => void;
 }
 
 export function ProductsPage({
   onAddProductClick,
   onAddStockClick,
   categories,
+  onDataChanged,
 }: ProductsPageProps) {
   const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
@@ -42,6 +47,8 @@ export function ProductsPage({
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [selectedProductForBarcode, setSelectedProductForBarcode] = useState<Product | null>(null);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -70,7 +77,14 @@ export function ProductsPage({
     return () => {
       unsubscribe();
     };
-  }, [selectedCategory, lowStockOnly]);
+  }, [selectedCategory, lowStockOnly, refreshKey]);
+
+  const handleImportSuccess = () => {
+    // The importing session refreshes immediately (other sessions receive the
+    // Supabase Realtime broadcast); either way no manual reload is needed.
+    setRefreshKey((key) => key + 1);
+    onDataChanged?.();
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,6 +128,14 @@ export function ProductsPage({
             >
               <Boxes className="w-4 h-4 text-slate-600" />
               <span>Add Stock</span>
+            </button>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-3.5 py-2.5 bg-white hover:bg-teal-50 text-teal-700 font-bold text-xs rounded-xl border border-teal-300 transition flex items-center space-x-1.5"
+              title="Import products from an Excel spreadsheet"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Import Products</span>
             </button>
           </div>
         )}
@@ -183,13 +205,22 @@ export function ProductsPage({
               Your pharmacy catalog is currently empty. Click "Add Product + Initial Stock" to create your first item.
             </p>
             {(user?.role === "OWNER" || user?.role === "ADMIN") && (
-              <button
-                onClick={onAddProductClick}
-                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Product Now</span>
-              </button>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={onAddProductClick}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Product Now</span>
+                </button>
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 shadow-sm transition inline-flex items-center space-x-1.5"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-teal-600" />
+                  <span>Import from Excel</span>
+                </button>
+              </div>
             )}
           </div>
         ) : (
@@ -400,6 +431,13 @@ export function ProductsPage({
           </div>
         )}
       </div>
+
+      {/* Excel Product Import (Owner / Admin only) */}
+      <ImportProductsModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={handleImportSuccess}
+      />
 
       {/* Barcode Generation & Print Modal */}
       {showBarcodeModal && selectedProductForBarcode && (

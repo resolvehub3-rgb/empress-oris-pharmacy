@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { CalendarDays, AlertTriangle, AlertCircle, Search, Filter, ShieldCheck } from "lucide-react";
 import { Batch } from "../types";
 import { apiRequest } from "../lib/api";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function BatchesPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -22,6 +23,17 @@ export function BatchesPage() {
 
   useEffect(() => {
     fetchBatches();
+
+    // Supabase Realtime: imported batches/stock appear without a page refresh.
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "PRODUCT_CREATED" || event === "PRODUCT_UPDATED" || event === "STOCK_UPDATED") {
+        fetchBatches();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [filter]);
 
   return (

@@ -74,7 +74,7 @@ export function ReceiptModal({ isOpen, onClose, receiptData }: ReceiptModalProps
         <div ref={receiptRef} className="p-6 text-slate-900 font-mono text-xs leading-relaxed print:p-0">
           {/* Pharmacy Branding */}
           <div className="text-center space-y-1 border-b border-dashed border-slate-300 pb-3">
-            {logoUrl && (
+            {resolvedLogo && (
               <img src={resolvedLogo} alt="Logo" className="w-12 h-12 mx-auto rounded-full object-contain mb-1" />
             )}
             <h1 className="text-sm font-black uppercase tracking-wider text-slate-900">{pharmacyName}</h1>

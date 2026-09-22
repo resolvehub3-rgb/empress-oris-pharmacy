@@ -23,7 +23,7 @@ const upload = multer({
 productsRouter.post(
   "/upload-image",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   upload.single("image"),
   async (req: Request, res: Response) => {
     if (!req.file) {
@@ -183,7 +183,7 @@ productsRouter.get("/:id", requireAuthentication, async (req: Request, res: Resp
 productsRouter.post(
   "/",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   async (req: Request, res: Response) => {
     const db = getDb();
     const rawSql = getRawSql();
@@ -390,7 +390,7 @@ productsRouter.post(
 productsRouter.put(
   "/:id",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   async (req: Request, res: Response) => {
     const db = getDb();
     if (!db) return res.status(503).json({ error: "Database not connected." });

@@ -80,8 +80,8 @@ export function Navbar({
         {/* Desktop App Download Button (Both Employee & Admin) */}
         <InstallAppButton variant="navbar" />
 
-        {/* Quick Add Product Button (Owner only) */}
-        {user?.role === "OWNER" && (
+        {/* Quick Add Product Button (Owner / Admin) */}
+        {(user?.role === "OWNER" || user?.role === "ADMIN") && (
           <button
             onClick={onAddProductClick}
             className="hidden md:inline-flex items-center space-x-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow-2xs transition"

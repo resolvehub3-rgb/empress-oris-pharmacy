@@ -20,6 +20,7 @@ import { Product, Category, Supplier } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { BarcodePrintModal } from "../components/BarcodePrintModal";
+import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 interface ProductsPageProps {
   onAddProductClick: () => void;
@@ -59,6 +60,16 @@ export function ProductsPage({
 
   useEffect(() => {
     fetchProducts();
+
+    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+      if (event === "PRODUCT_CREATED" || event === "PRODUCT_UPDATED" || event === "STOCK_UPDATED") {
+        fetchProducts();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [selectedCategory, lowStockOnly]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -88,7 +99,7 @@ export function ProductsPage({
           </p>
         </div>
 
-        {user?.role === "OWNER" && (
+        {(user?.role === "OWNER" || user?.role === "ADMIN") && (
           <div className="flex items-center space-x-2">
             <button
               onClick={onAddProductClick}
@@ -171,7 +182,7 @@ export function ProductsPage({
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
               Your pharmacy catalog is currently empty. Click "Add Product + Initial Stock" to create your first item.
             </p>
-            {user?.role === "OWNER" && (
+            {(user?.role === "OWNER" || user?.role === "ADMIN") && (
               <button
                 onClick={onAddProductClick}
                 className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-sm transition inline-flex items-center space-x-1.5"
@@ -301,7 +312,7 @@ export function ProductsPage({
                             <span>Barcode</span>
                           </button>
 
-                          {user?.role === "OWNER" && (
+                          {(user?.role === "OWNER" || user?.role === "ADMIN") && (
                             <button
                               onClick={() => onAddStockClick(p)}
                               className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold rounded-lg text-xs"
@@ -321,7 +332,7 @@ export function ProductsPage({
                                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                                   Live Batches for {p.name} (FEFO Order)
                                 </span>
-                                {user?.role === "OWNER" && (
+                                {(user?.role === "OWNER" || user?.role === "ADMIN") && (
                                   <button
                                     onClick={() => onAddStockClick(p)}
                                     className="text-xs font-bold text-teal-600 hover:underline"

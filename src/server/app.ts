@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { authRouter } from "./routes/auth";
 import { productsRouter } from "./routes/products";
 import { stockRouter } from "./routes/stock";
@@ -54,6 +55,21 @@ export function createExpressApp() {
   app.use("/api/settings", settingsRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/audit", auditRouter);
+
+  // Global error handler for multer and other errors
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "File is too large. Maximum size is 5MB." });
+      }
+      return res.status(400).json({ error: err.message || "File upload error." });
+    }
+    if (err.message && err.message.includes("Only JPEG")) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("[App] Unhandled error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  });
 
   return app;
 }

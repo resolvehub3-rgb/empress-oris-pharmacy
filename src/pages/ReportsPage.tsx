@@ -10,7 +10,9 @@ export function ReportsPage() {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const res = await apiRequest<any>("/api/reports/sales-summary");
+      const endDate = new Date().toISOString().split("T")[0];
+      const startDate = new Date(Date.now() - parseInt(dateRange) * 86400000).toISOString().split("T")[0];
+      const res = await apiRequest<any>(`/api/reports/sales-summary?startDate=${startDate}&endDate=${endDate}`);
       setReport(res);
     } catch (err) {
       console.warn("[Reports] Error:", err);

@@ -192,8 +192,8 @@ reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER", "ADMIN"
         p.id,
         p.name,
         p.sku,
-        COALESCE(SUM(si.quantity), 0)::integer as units_sold,
-        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_revenue,
+        COALESCE(SUM(si.quantity), 0)::integer as total_qty,
+        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_sales,
         COALESCE(SUM(si.total_cost), 0)::numeric(12,2) as total_cost,
         (COALESCE(SUM(si.total_price), 0) - COALESCE(SUM(si.total_cost), 0))::numeric(12,2) as gross_profit
       FROM sale_items si
@@ -201,12 +201,74 @@ reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER", "ADMIN"
       JOIN sales s ON si.sale_id = s.id
       WHERE s.status = 'COMPLETED' ${dateFilter}
       GROUP BY p.id, p.name, p.sku
-      ORDER BY units_sold DESC
+      ORDER BY total_qty DESC
       LIMIT 20
     `);
 
     return res.json({ paymentBreakdown, topProducts });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || "Failed to fetch sales report" });
+  }
+});
+
+// Sales Summary with Gross Profit for ReportsPage
+reportsRouter.get("/sales-summary", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req: Request, res: Response) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+
+  const { startDate, endDate } = req.query;
+
+  try {
+    const dateFilter = startDate && endDate
+      ? `AND s.created_at >= '${startDate}'::timestamptz AND s.created_at <= '${endDate} 23:59:59'::timestamptz`
+      : "";
+
+    // 1. Totals: Revenue, COGS, Gross Profit
+    const [totals] = await rawSql.unsafe(`
+      SELECT 
+        COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as revenue,
+        COALESCE(SUM(s.total_cost), 0)::numeric(12,2) as cogs,
+        (COALESCE(SUM(s.total_amount), 0) - COALESCE(SUM(s.total_cost), 0))::numeric(12,2) as gross_profit,
+        COUNT(s.id)::integer as total_transactions
+      FROM sales s
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+    `);
+
+    // 2. Payment methods breakdown
+    const paymentMethods = await rawSql.unsafe(`
+      SELECT 
+        COALESCE(p.payment_method, 'CASH') as payment_method,
+        COUNT(s.id)::integer as count,
+        COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as total
+      FROM sales s
+      JOIN payments p ON s.id = p.sale_id
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+      GROUP BY p.payment_method
+      ORDER BY total DESC
+    `);
+
+    // 3. Top products with gross profit per product
+    const topProducts = await rawSql.unsafe(`
+      SELECT 
+        p.id,
+        p.name,
+        p.sku,
+        COALESCE(SUM(si.quantity), 0)::integer as total_qty,
+        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_sales,
+        COALESCE(SUM(si.total_cost), 0)::numeric(12,2) as total_cost,
+        (COALESCE(SUM(si.total_price), 0) - COALESCE(SUM(si.total_cost), 0))::numeric(12,2) as gross_profit
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      JOIN sales s ON si.sale_id = s.id
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+      GROUP BY p.id, p.name, p.sku
+      ORDER BY total_qty DESC
+      LIMIT 20
+    `);
+
+    return res.json({ totals, paymentMethods, topProducts });
+  } catch (err: any) {
+    console.error("[Sales Summary] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to generate sales summary" });
   }
 });

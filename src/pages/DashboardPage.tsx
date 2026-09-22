@@ -39,6 +39,10 @@ export function DashboardPage({
   lowStockCount: propLowStockCount,
 }: DashboardPageProps) {
   const { user } = useAuth();
+  // Gross profit, margin and COGS analytics are Owner/Admin only.
+  // Employees and cashiers must never see them (the dashboard API is also
+  // OWNER/ADMIN-gated server-side, so no profit data is ever sent to them).
+  const canViewProfit = user?.role === "OWNER" || user?.role === "ADMIN";
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -106,7 +110,9 @@ export function DashboardPage({
             </span>
           </div>
           <p className="text-xs text-slate-500">
-            Real-time sales, FEFO inventory tracking, and gross profit analytics.
+            {canViewProfit
+              ? "Real-time sales, FEFO inventory tracking, and gross profit analytics."
+              : "Real-time sales and FEFO inventory tracking."}
           </p>
         </div>
 
@@ -184,8 +190,12 @@ export function DashboardPage({
         </div>
       )}
 
-      {/* Primary KPI Grid: 2-column on mobile, 4-column on desktop */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+      {/* Primary KPI Grid: 2-column on mobile, 3/4-column on desktop */}
+      <div
+        className={`grid grid-cols-2 gap-2.5 sm:gap-4 ${
+          canViewProfit ? "lg:grid-cols-4" : "lg:grid-cols-3"
+        }`}
+      >
         {/* Today's Sales */}
         <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs space-y-1.5 sm:space-y-2">
           <div className="flex items-center justify-between">
@@ -247,24 +257,26 @@ export function DashboardPage({
           </div>
         </div>
 
-        {/* Gross Profit (COGS-based) */}
-        <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs space-y-1.5 sm:space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider truncate">
-              Gross Profit
-            </span>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        {/* Gross Profit (COGS-based) — hidden from employees/cashiers */}
+        {canViewProfit && (
+          <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs space-y-1.5 sm:space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider truncate">
+                Gross Profit
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </div>
+            </div>
+            <div className="text-base sm:text-2xl font-black text-indigo-950 tracking-tight truncate">
+              GH₵ {parseFloat(data?.finance.grossProfit || "0").toFixed(2)}
+            </div>
+            <div className="text-[10px] sm:text-xs text-slate-500 flex items-center justify-between pt-1 border-t border-slate-100">
+              <span>Margin:</span>
+              <span className="font-bold text-emerald-600">{data?.finance.grossMarginPercent || "0.0"}%</span>
             </div>
           </div>
-          <div className="text-base sm:text-2xl font-black text-indigo-950 tracking-tight truncate">
-            GH₵ {parseFloat(data?.finance.grossProfit || "0").toFixed(2)}
-          </div>
-          <div className="text-[10px] sm:text-xs text-slate-500 flex items-center justify-between pt-1 border-t border-slate-100">
-            <span>Margin:</span>
-            <span className="font-bold text-emerald-600">{data?.finance.grossMarginPercent || "0.0"}%</span>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Stock Health & Alerts Overview: Responsive cards */}

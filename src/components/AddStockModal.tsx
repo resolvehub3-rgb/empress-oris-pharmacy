@@ -303,6 +303,13 @@ export function AddStockModal({
             </div>
           </div>
 
+          {costPrice && sellingPrice && parseFloat(costPrice) >= parseFloat(sellingPrice) && (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-800 font-bold flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Cost price must be lower than selling price to make a profit.</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">Supplier</label>

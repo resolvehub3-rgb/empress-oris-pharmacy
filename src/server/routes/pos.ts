@@ -242,6 +242,8 @@ posRouter.post("/checkout", requireAuthentication, async (req: Request, res: Res
           itemTotalCost += batchCost;
           totalCostOfGoodsSold += batchCost;
 
+          console.log(`[POS COGS] Batch ${b.batch_number}: cost_price=GH₵${unitCost}, qty=${qtyFromThisBatch}, batchCost=GH₵${batchCost}`);
+
           batchAllocations.push({
             batchId: b.id,
             batchNumber: b.batch_number,

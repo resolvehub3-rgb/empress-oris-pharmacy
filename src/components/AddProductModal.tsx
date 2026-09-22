@@ -674,6 +674,12 @@ export function AddProductModal({
                     />
                   </div>
                   <span className="text-[11px] text-slate-500 mt-0.5 block">Used for Cost of Goods Sold (COGS)</span>
+                  {costPrice && sellingPrice && parseFloat(costPrice) >= parseFloat(sellingPrice) && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-800 font-bold flex items-center space-x-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Cost must be lower than selling price to generate profit.</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-white p-3 rounded-xl border border-teal-200 shadow-2xs">

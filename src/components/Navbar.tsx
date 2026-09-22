@@ -10,7 +10,6 @@ import {
   Menu,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { InstallAppButton } from "./InstallAppButton";
 
 interface NavbarProps {
   onOpenShiftClick: () => void;
@@ -75,11 +74,8 @@ export function Navbar({
         </div>
       </div>
 
-      {/* Right: Actions, Desktop App Download, Shift status, Notifications, User Profile */}
+      {/* Right: Actions, Shift status, Notifications, User Profile */}
       <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
-        {/* Desktop App Download Button (Both Employee & Admin) */}
-        <InstallAppButton variant="navbar" />
-
         {/* Quick Add Product Button (Owner / Admin) */}
         {(user?.role === "OWNER" || user?.role === "ADMIN") && (
           <button

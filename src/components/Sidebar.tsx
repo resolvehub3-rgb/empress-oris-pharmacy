@@ -20,7 +20,6 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { InstallAppButton } from "./InstallAppButton";
 
 export type NavTab =
   | "dashboard"
@@ -198,11 +197,6 @@ export function Sidebar({
             </div>
           </div>
         ))}
-
-        {/* Download Native Desktop App Widget */}
-        <div className="pt-2">
-          <InstallAppButton variant="sidebar" />
-        </div>
       </div>
 
       {/* Bottom Pharmacy Info */}

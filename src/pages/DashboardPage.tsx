@@ -14,8 +14,6 @@ import {
   Receipt,
   FileSpreadsheet,
   CheckCircle2,
-  Monitor,
-  Download,
   Sparkles,
   RefreshCw,
 } from "lucide-react";
@@ -24,8 +22,6 @@ import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 import { LowStockAlertBanner } from "../components/LowStockAlertBanner";
-import { InstallAppModal } from "../components/InstallAppModal";
-import { usePWAInstall } from "../hooks/usePWAInstall";
 
 interface DashboardPageProps {
   onNavigate: (tab: any) => void;
@@ -48,8 +44,6 @@ export function DashboardPage({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [error, setError] = useState<string | null>(null);
-  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
-  const { isInstalled, hasPrompt } = usePWAInstall();
 
   const fetchDashboard = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -143,18 +137,6 @@ export function DashboardPage({
                 <span>Add Stock</span>
               </button>
             </>
-          )}
-
-          {/* Desktop App Download CTA */}
-          {!isInstalled && (
-            <button
-              onClick={() => setIsInstallModalOpen(true)}
-              className="w-full md:w-auto px-3 py-2.5 bg-teal-50 hover:bg-teal-100 active:scale-98 text-teal-800 font-bold text-xs rounded-xl border border-teal-200 transition flex items-center justify-center space-x-1.5"
-              title="Download Empress Oris Desktop Application"
-            >
-              <Monitor className="w-4 h-4 text-teal-600" />
-              <span>Download Desktop App</span>
-            </button>
           )}
         </div>
       </div>
@@ -474,12 +456,6 @@ export function DashboardPage({
           </>
         )}
       </div>
-
-      {/* Desktop App Installation Modal */}
-      <InstallAppModal
-        isOpen={isInstallModalOpen}
-        onClose={() => setIsInstallModalOpen(false)}
-      />
     </div>
   );
 }

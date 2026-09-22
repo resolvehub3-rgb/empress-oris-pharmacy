@@ -202,7 +202,7 @@ export function Sidebar({
       {/* Bottom Pharmacy Info */}
       <div className="p-4 border-t border-slate-800 bg-slate-950/60 text-[11px] text-slate-500 flex items-center justify-between">
         <div>
-          <p className="font-semibold text-slate-300">Ghanaian Pharmacy OS</p>
+          <p className="font-semibold text-slate-300">SamTeck Digital OS</p>
           <p className="text-[10px] text-slate-500">v2.0 • Supabase Live</p>
         </div>
         <div className="flex items-center space-x-1.5">

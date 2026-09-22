@@ -164,7 +164,7 @@ export function DashboardPage({
               Empty Database Ready
             </span>
             <h2 className="text-xl sm:text-3xl font-black tracking-tight">
-              Ready to stock your Ghanaian Pharmacy
+              Ready to stock your SamTeck Digital Store
             </h2>
             <p className="text-xs sm:text-sm text-teal-200 leading-relaxed">
               No products have been added to your Supabase PostgreSQL database yet. Use our unified{" "}

@@ -39,10 +39,10 @@ export function DashboardPage({
   lowStockCount: propLowStockCount,
 }: DashboardPageProps) {
   const { user } = useAuth();
-  // Gross profit, margin and COGS analytics are Owner/Admin only.
-  // Employees and cashiers must never see them (the dashboard API is also
-  // OWNER/ADMIN-gated server-side, so no profit data is ever sent to them).
-  const canViewProfit = user?.role === "OWNER" || user?.role === "ADMIN";
+  // Owner/Admin only: gross profit/margin analytics AND the low-stock
+  // replenishment alert banner. Employees/cashiers never see either, and the
+  // backend never sends them profit fields or low-stock product details.
+  const isOwnerOrAdmin = user?.role === "OWNER" || user?.role === "ADMIN";
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -110,7 +110,7 @@ export function DashboardPage({
             </span>
           </div>
           <p className="text-xs text-slate-500">
-            {canViewProfit
+            {isOwnerOrAdmin
               ? "Real-time sales, FEFO inventory tracking, and gross profit analytics."
               : "Real-time sales and FEFO inventory tracking."}
           </p>
@@ -147,8 +147,8 @@ export function DashboardPage({
         </div>
       </div>
 
-      {/* Visual Low Stock Notification System (Supabase Realtime Monitored) */}
-      {!isDatabaseEmpty && (
+      {/* Visual Low Stock Notification System (Owner/Admin only — never shown to cashiers) */}
+      {isOwnerOrAdmin && !isDatabaseEmpty && (
         <LowStockAlertBanner
           lowStockCount={effectiveLowStockCount}
           lowStockProducts={data?.lowStockProducts}
@@ -193,7 +193,7 @@ export function DashboardPage({
       {/* Primary KPI Grid: 2-column on mobile, 3/4-column on desktop */}
       <div
         className={`grid grid-cols-2 gap-2.5 sm:gap-4 ${
-          canViewProfit ? "lg:grid-cols-4" : "lg:grid-cols-3"
+          isOwnerOrAdmin ? "lg:grid-cols-4" : "lg:grid-cols-3"
         }`}
       >
         {/* Today's Sales */}
@@ -258,7 +258,7 @@ export function DashboardPage({
         </div>
 
         {/* Gross Profit (COGS-based) — hidden from employees/cashiers */}
-        {canViewProfit && (
+        {isOwnerOrAdmin && (
           <div className="bg-white p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs space-y-1.5 sm:space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider truncate">

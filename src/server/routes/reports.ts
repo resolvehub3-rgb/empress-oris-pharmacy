@@ -127,9 +127,11 @@ reportsRouter.get("/dashboard", requireAuthentication, async (req: Request, res:
     const expenses = parseFloat(expensesData?.total_expenses || "0");
     const netProfit = grossProfit - expenses;
 
-    // Profit analytics are Owner/Admin only - never serialize them for employees.
-    const canViewProfit = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
-    const finance = canViewProfit
+    // Owner/Admin only: profit analytics (COGS, gross/net profit, margin) and
+    // the low-stock replenishment detail list are never serialized for
+    // employees/cashiers - they only receive the plain operational counts.
+    const isOwnerOrAdmin = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
+    const finance = isOwnerOrAdmin
       ? {
           revenue: revenue.toFixed(2),
           costOfGoodsSold: cogs.toFixed(2),
@@ -163,7 +165,7 @@ reportsRouter.get("/dashboard", requireAuthentication, async (req: Request, res:
         openShifts: shiftsData?.open_shifts || 0,
       },
       recentTransactions: recentSales,
-      lowStockProducts: lowStockProducts || [],
+      lowStockProducts: isOwnerOrAdmin ? lowStockProducts || [] : [],
     });
   } catch (err: any) {
     console.error("[Dashboard Reports] Error:", err);

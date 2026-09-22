@@ -32,6 +32,12 @@ function MainApp() {
   const { user, status, loading: authLoading } = useAuth();
   const [currentTab, setCurrentTab] = useState<NavTab>("dashboard");
 
+  useEffect(() => {
+    if (user?.role === "EMPLOYEE") {
+      setCurrentTab("pos");
+    }
+  }, [user]);
+
   // Global state
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);

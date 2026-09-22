@@ -384,6 +384,15 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
                     }`}
                   >
                     <div>
+                      {/* Product Image */}
+                      {product.imageUrl && (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name}
+                          className="w-full h-28 object-cover rounded-xl mb-2"
+                        />
+                      )}
+
                       {/* Product Badges */}
                       <div className="flex items-center justify-between gap-1 mb-1.5">
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 truncate max-w-[90px]">

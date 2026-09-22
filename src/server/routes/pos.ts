@@ -28,32 +28,32 @@ posRouter.get("/search", requireAuthentication, async (req: Request, res: Respon
         SELECT 
           p.id,
           p.name,
-          p.generic_name,
-          p.brand_name,
+          p.generic_name AS "genericName",
+          p.brand_name AS "brandName",
           p.sku,
           p.barcode,
-          p.dosage_form,
+          p.dosage_form AS "dosageForm",
           p.strength,
           p.unit,
-          p.pack_size,
-          p.prescription_required,
-          p.image_url,
-          p.selling_price,
-          p.reorder_level,
-          c.name as category_name,
-          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
+          p.pack_size AS "packSize",
+          p.prescription_required AS "prescriptionRequired",
+          p.image_url AS "imageUrl",
+          p.selling_price AS "sellingPrice",
+          p.reorder_level AS "reorderLevel",
+          c.name AS "categoryName",
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer AS "totalStock",
           COALESCE(
             json_agg(
               json_build_object(
                 'id', b.id,
-                'batch_number', b.batch_number,
-                'current_quantity', b.current_quantity,
-                'expiry_date', b.expiry_date,
-                'selling_price', b.selling_price
+                'batchNumber', b.batch_number,
+                'currentQuantity', b.current_quantity,
+                'expiryDate', b.expiry_date,
+                'sellingPrice', b.selling_price
               ) ORDER BY b.expiry_date ASC
             ) FILTER (WHERE b.id IS NOT NULL AND b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE),
             '[]'::json
-          ) as available_batches
+          ) AS "availableBatches"
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
         LEFT JOIN batches b ON p.id = b.product_id
@@ -79,32 +79,32 @@ posRouter.get("/search", requireAuthentication, async (req: Request, res: Respon
       SELECT 
         p.id,
         p.name,
-        p.generic_name,
-        p.brand_name,
+        p.generic_name AS "genericName",
+        p.brand_name AS "brandName",
         p.sku,
         p.barcode,
-        p.dosage_form,
+        p.dosage_form AS "dosageForm",
         p.strength,
         p.unit,
-        p.pack_size,
-        p.prescription_required,
-        p.image_url,
-        p.selling_price,
-        p.reorder_level,
-        c.name as category_name,
-        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
+        p.pack_size AS "packSize",
+        p.prescription_required AS "prescriptionRequired",
+        p.image_url AS "imageUrl",
+        p.selling_price AS "sellingPrice",
+        p.reorder_level AS "reorderLevel",
+        c.name AS "categoryName",
+        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer AS "totalStock",
         COALESCE(
           json_agg(
             json_build_object(
               'id', b.id,
-              'batch_number', b.batch_number,
-              'current_quantity', b.current_quantity,
-              'expiry_date', b.expiry_date,
-              'selling_price', b.selling_price
+              'batchNumber', b.batch_number,
+              'currentQuantity', b.current_quantity,
+              'expiryDate', b.expiry_date,
+              'sellingPrice', b.selling_price
             ) ORDER BY b.expiry_date ASC
           ) FILTER (WHERE b.id IS NOT NULL AND b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE),
           '[]'::json
-        ) as available_batches
+        ) AS "availableBatches"
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN batches b ON p.id = b.product_id

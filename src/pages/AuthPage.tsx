@@ -63,7 +63,17 @@ export function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 flex items-center justify-center p-4 sm:p-6 lg:p-8">
+    <div
+      className="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8"
+      style={{
+        backgroundImage:
+          "linear-gradient(rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.88)), url('/auth-bg.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundColor: "#0f172a",
+      }}
+    >
       <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200 grid grid-cols-1 lg:grid-cols-12 animate-in fade-in zoom-in-95 duration-200">
         
         {/* Left Column: Brand & System Information */}

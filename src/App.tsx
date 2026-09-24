@@ -96,7 +96,7 @@ function MainApp() {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
         <div className="text-center space-y-4">
-          <img src="/logo.png" alt="Empress Oris Logo" className="w-20 h-20 mx-auto rounded-2xl object-contain shadow-lg" />
+          <img src="/logo.png" alt="Empress Oris Logo" className="w-40 h-40 mx-auto rounded-3xl object-contain shadow-2xl" />
           <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-xs font-bold text-slate-300 tracking-wider uppercase">
             Connecting to SamTeck Digital System...

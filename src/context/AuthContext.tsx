@@ -66,9 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // Run both in parallel: they are independent, and serialising them cost a
+    // full extra network round trip before the app could render.
     async function init() {
-      await refreshStatus();
-      await refreshProfile();
+      await Promise.all([refreshStatus(), refreshProfile()]);
     }
     init();
   }, []);

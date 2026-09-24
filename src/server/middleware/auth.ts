@@ -19,6 +19,44 @@ declare global {
   }
 }
 
+/**
+ * Short-lived verification cache for bearer tokens.
+ *
+ * Every API call used to cost an outbound Supabase Auth HTTP round trip plus a
+ * Postgres user lookup *before* the actual query even started - that was a
+ * large slice of the latency on POS search/checkout. Verified sessions are now
+ * remembered in-process for AUTH_CACHE_TTL_MS (60s), so repeat requests from a
+ * logged-in terminal resolve from memory.
+ *
+ * Trade-off: role/status changes or revocations take effect after at most 60
+ * seconds (logout invalidates immediately). This is server-side memory only -
+ * nothing is stored client-side.
+ */
+const AUTH_CACHE_TTL_MS = 60_000;
+const AUTH_CACHE_MAX_ENTRIES = 500;
+const authCache = new Map<string, { user: AuthenticatedUser; expires: number }>();
+
+/** Drop a cached verification (called on logout). */
+export function invalidateAuthCache(token?: string | null) {
+  if (token) authCache.delete(token);
+  else authCache.clear();
+}
+
+function rememberVerifiedToken(token: string, user: AuthenticatedUser) {
+  const now = Date.now();
+  authCache.set(token, { user, expires: now + AUTH_CACHE_TTL_MS });
+
+  // Opportunistic prune of expired entries, oldest first if still oversized.
+  for (const [key, entry] of authCache) {
+    if (entry.expires <= now) authCache.delete(key);
+  }
+  while (authCache.size > AUTH_CACHE_MAX_ENTRIES) {
+    const oldest = authCache.keys().next().value;
+    if (oldest === undefined) break;
+    authCache.delete(oldest);
+  }
+}
+
 export async function requireAuthentication(
   req: Request,
   res: Response,
@@ -30,6 +68,12 @@ export async function requireAuthentication(
   }
 
   const token = authHeader.split(" ")[1];
+
+  const cached = authCache.get(token);
+  if (cached && cached.expires > Date.now()) {
+    req.user = cached.user;
+    return next();
+  }
 
   try {
     const supabase = getSupabase();
@@ -52,6 +96,7 @@ export async function requireAuthentication(
               role: found.role as "OWNER" | "ADMIN" | "EMPLOYEE",
               status: found.status,
             };
+            rememberVerifiedToken(token, req.user);
             return next();
           }
         }
@@ -79,6 +124,7 @@ export async function requireAuthentication(
           role: user.role as "OWNER" | "ADMIN" | "EMPLOYEE",
           status: user.status,
         };
+        rememberVerifiedToken(token, req.user);
         return next();
       }
     }

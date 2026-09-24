@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import {
   Search,
   Barcode,
@@ -22,7 +22,12 @@ import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 import { ReceiptModal } from "../components/ReceiptModal";
-import { CameraScannerModal } from "../components/CameraScannerModal";
+
+// The camera scanner pulls in html5-qrcode (a large WASM/camera helper).
+// Loading it on demand keeps the POS terminal's first paint light.
+const CameraScannerModal = lazy(() =>
+  import("../components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
+);
 
 interface PosPageProps {
   onOpenShiftClick: () => void;
@@ -87,9 +92,14 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
     }
   };
 
+  // Categories rarely change during a shift - fetch them once on mount instead
+  // of re-querying the database every time a category chip is tapped.
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
   useEffect(() => {
     fetchProducts(searchQuery, selectedCategory);
-    fetchCategories();
   }, [selectedCategory]);
 
   // Keep the latest search parameters for the realtime refetch closure.
@@ -99,14 +109,24 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   }, [searchQuery, selectedCategory]);
 
   // Supabase Realtime: newly imported products and stock changes appear in the
-  // POS immediately - without any manual page reload.
+  // POS immediately - without any manual page reload. Bursts of events (a bulk
+  // import, several sales at once) are coalesced into one refresh so the
+  // catalog is not re-queried and re-rendered over and over mid-sale.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const unsubscribe = subscribeToPharmacyRealtime((event) => {
       if (event === "PRODUCT_CREATED" || event === "PRODUCT_UPDATED" || event === "STOCK_UPDATED") {
-        fetchProducts(searchParamsRef.current.query, searchParamsRef.current.category);
+        if (refreshTimerRef.current) return;
+        refreshTimerRef.current = setTimeout(() => {
+          refreshTimerRef.current = null;
+          fetchProducts(searchParamsRef.current.query, searchParamsRef.current.category);
+        }, 400);
       }
     });
-    return () => unsubscribe();
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      unsubscribe();
+    };
   }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -370,7 +390,7 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
 
         {/* Product Cards Grid */}
         <div className="flex-1 overflow-y-auto pr-1">
-          {loading ? (
+          {loading && products.length === 0 ? (
             <div className="h-full flex items-center justify-center">
               <div className="text-center space-y-2">
                 <div className="w-6 h-6 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -407,6 +427,8 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
                         <img
                           src={product.imageUrl}
                           alt={product.name}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-28 object-cover rounded-xl mb-2"
                         />
                       )}
@@ -782,11 +804,13 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
 
       {/* Camera QR & Barcode Scanner Modal */}
       {showCameraScanner && (
-        <CameraScannerModal
-          isOpen={showCameraScanner}
-          onClose={() => setShowCameraScanner(false)}
-          onProductScanned={(product) => addToCart(product)}
-        />
+        <Suspense fallback={null}>
+          <CameraScannerModal
+            isOpen={showCameraScanner}
+            onClose={() => setShowCameraScanner(false)}
+            onProductScanned={(product) => addToCart(product)}
+          />
+        </Suspense>
       )}
     </div>
   );

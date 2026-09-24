@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import {
   Package,
   Plus,
@@ -20,9 +20,14 @@ import {
 import { Product, Category, Supplier } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { BarcodePrintModal } from "../components/BarcodePrintModal";
 import { ImportProductsModal } from "../components/ImportProductsModal";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
+
+// JsBarcode is only needed when the label-printer dialog is actually opened,
+// so keep it out of the initial products chunk.
+const BarcodePrintModal = lazy(() =>
+  import("../components/BarcodePrintModal").then((m) => ({ default: m.BarcodePrintModal }))
+);
 
 interface ProductsPageProps {
   onAddProductClick: () => void;
@@ -439,22 +444,24 @@ export function ProductsPage({
         onSuccess={handleImportSuccess}
       />
 
-      {/* Barcode Generation & Print Modal */}
+      {/* Barcode Generation & Print Modal (jsbarcode is loaded on demand) */}
       {showBarcodeModal && selectedProductForBarcode && (
-        <BarcodePrintModal
-          isOpen={showBarcodeModal}
-          onClose={() => {
-            setShowBarcodeModal(false);
-            setSelectedProductForBarcode(null);
-          }}
-          product={selectedProductForBarcode}
-          onProductUpdated={(updated) => {
-            setProducts((prev) =>
-              prev.map((p) => (p.id === updated.id ? { ...p, barcode: updated.barcode } : p))
-            );
-            setSelectedProductForBarcode(updated);
-          }}
-        />
+        <Suspense fallback={null}>
+          <BarcodePrintModal
+            isOpen={showBarcodeModal}
+            onClose={() => {
+              setShowBarcodeModal(false);
+              setSelectedProductForBarcode(null);
+            }}
+            product={selectedProductForBarcode}
+            onProductUpdated={(updated) => {
+              setProducts((prev) =>
+                prev.map((p) => (p.id === updated.id ? { ...p, barcode: updated.barcode } : p))
+              );
+              setSelectedProductForBarcode(updated);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

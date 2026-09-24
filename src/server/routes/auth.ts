@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { getDb, schema } from "../../db";
 import { eq } from "drizzle-orm";
 import { getSupabase } from "../../services/supabase";
-import { requireAuthentication } from "../middleware/auth";
+import { requireAuthentication, invalidateAuthCache } from "../middleware/auth";
 import { runSchemaInit } from "../../db/init";
 
 export const authRouter = Router();
@@ -270,6 +270,11 @@ authRouter.get("/me", requireAuthentication, async (req: Request, res: Response)
 
 // Logout
 authRouter.post("/logout", requireAuthentication, async (req: Request, res: Response) => {
+  // Immediately drop the cached verification so the session stops being
+  // accepted without waiting for the auth cache TTL to lapse.
+  const authHeader = req.headers.authorization;
+  invalidateAuthCache(authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null);
+
   const db = getDb();
   if (db && req.user) {
     await db.insert(schema.auditLogs).values({

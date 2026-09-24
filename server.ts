@@ -24,8 +24,28 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          if (
+            filePath.endsWith(".html") ||
+            filePath.endsWith("sw.js") ||
+            filePath.endsWith(".webmanifest")
+          ) {
+            // Service worker + entry document must always revalidate.
+            res.setHeader("Cache-Control", "no-cache");
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            // Vite fingerprints these filenames, so they can be cached hard.
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          } else {
+            res.setHeader("Cache-Control", "public, max-age=3600");
+          }
+        },
+      })
+    );
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

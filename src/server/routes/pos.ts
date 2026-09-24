@@ -359,12 +359,16 @@ posRouter.post("/checkout", requireAuthentication, async (req: Request, res: Res
       };
     });
 
-    // Supabase Realtime Broadcast
-    await broadcastRealtimeEvent("SALE_COMPLETED", {
+    // Supabase Realtime Broadcast - fire-and-forget. Awaiting it here would
+    // hold the cashier's "sale complete" response on an outbound Supabase
+    // round trip; clients refresh through their own realtime subscription.
+    void broadcastRealtimeEvent("SALE_COMPLETED", {
       saleId: result.sale.id,
       receiptNumber: result.sale.receipt_number,
       totalAmount: result.sale.total_amount,
       cashierId: req.user?.id,
+    }).catch(() => {
+      /* already logged inside broadcastRealtimeEvent */
     });
 
     return res.status(201).json({

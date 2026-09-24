@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
+import { gzipCompression } from "./compress";
 import { authRouter } from "./routes/auth";
 import { importRouter } from "./routes/import";
 import { productsRouter } from "./routes/products";
@@ -23,6 +24,9 @@ export function createExpressApp() {
   const app = express();
 
   app.use(cors());
+  // Gzip JSON API responses and static JS/CSS/HTML (biggest wire-size win for
+  // cashier POS terminals). Registered before routes/static so it wraps both.
+  app.use(gzipCompression());
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 

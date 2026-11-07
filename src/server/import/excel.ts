@@ -114,6 +114,8 @@ export interface ParsedWorkbook {
   sheetName: string;
   sheetNames: string[];
   headerRowNumber: number;
+  /** Raw header labels as they appeared in the workbook (0-based). */
+  headers: string[];
   mapping: HeaderMappingResult;
   rows: ParsedRow[];
   /** Data rows that were entirely blank and therefore ignored. */
@@ -202,6 +204,7 @@ export function parseProductWorkbook(file: UploadedExcelFile): ParsedWorkbook {
 
   const mapping = bestMapping;
   const headerRowNumber = firstRowNumber + headerIndex;
+  const headers = (grid[headerIndex] || []).map((cell) => String(cell ?? "").trim());
 
   if (mapping.missingRequired.length > 0) {
     const list = mapping.missingRequired.map((key) => `- ${fieldLabel(key)}`).join("\n");
@@ -239,6 +242,7 @@ export function parseProductWorkbook(file: UploadedExcelFile): ParsedWorkbook {
     sheetName: preferred,
     sheetNames: workbook.SheetNames,
     headerRowNumber,
+    headers,
     mapping,
     rows,
     skippedBlankRows,

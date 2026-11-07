@@ -52,7 +52,7 @@ export const COLUMNS: ColumnDef[] = [
     required: true,
     kind: "text",
     hint: "Required. Name of the product as it appears in the POS (e.g. Paracetamol 500mg).",
-    aliases: ["name", "itemname", "drugname", "product", "producttitle", "medicine", "medicinename"],
+    aliases: ["name", "item", "itemname", "item name", "product", "productname", "product name", "drugname", "drug name", "producttitle", "medicine", "medicinename"],
   },
   {
     key: "genericName",
@@ -76,7 +76,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "text",
     hint: "Stock keeping unit. Leave blank and a unique SKU is generated automatically. Must be unique.",
-    aliases: ["sku", "skucode", "itemcode", "productcode", "stockcode", "reference"],
+    aliases: ["sku", "skucode", "sku code", "itemcode", "item code", "productcode", "product code", "stockcode", "stock code", "reference"],
   },
   {
     key: "barcode",
@@ -84,7 +84,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "text",
     hint: "UPC/EAN barcode. Must be unique when supplied.",
-    aliases: ["barcode", "barcodes", "upc", "ean", "gtin", "upccode", "eancode"],
+    aliases: ["barcode", "barcodes", "barcode number", "upc", "ean", "gtin", "upccode", "eancode"],
   },
   {
     key: "category",
@@ -92,7 +92,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "text",
     hint: "Existing category name, or a new one - new categories are created automatically.",
-    aliases: ["category", "categoryname", "productcategory", "drugcategory", "therapeuticcategory"],
+    aliases: ["category", "categoryname", "category name", "productcategory", "product category", "drugcategory", "drug category", "therapeuticcategory"],
   },
   {
     key: "dosageForm",
@@ -164,7 +164,7 @@ export const COLUMNS: ColumnDef[] = [
     required: true,
     kind: "price",
     hint: "Required. Retail selling price in Ghana Cedis as a plain number (e.g. 10.50).",
-    aliases: ["sellingprice", "price", "retailprice", "saleprice", "sellingpriceghs", "sellingpricegh", "unitretailprice"],
+    aliases: ["sellingprice", "selling price", "sellprice", "sell price", "price", "retailprice", "retail price", "saleprice", "sale price", "sellingpriceghs", "sellingpricegh", "unitretailprice", "unit price"],
   },
   {
     key: "wholesalePrice",
@@ -180,7 +180,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "integer",
     hint: "Opening stock units (whole number >= 0). Blank or 0 = product imported without stock.",
-    aliases: ["initialquantity", "quantity", "qty", "openingstock", "initialstock", "stockquantity", "stockqty", "units"],
+    aliases: ["initialquantity", "initial quantity", "quantity", "qty", "stock", "openingstock", "opening stock", "initialstock", "initial stock", "stockquantity", "stock quantity", "stockqty", "units", "unit"],
   },
   {
     key: "batchNumber",
@@ -188,7 +188,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "text",
     hint: "Required when Initial Quantity > 0 (pharmaceutical batch / lot).",
-    aliases: ["batchnumber", "batch", "batchno", "lotnumber", "lotno", "lot"],
+    aliases: ["batchnumber", "batch number", "batch", "batchno", "batch no", "lotnumber", "lot number", "lotno", "lot no", "lot"],
   },
   {
     key: "costPrice",
@@ -196,7 +196,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "price",
     hint: "Unit cost price in Ghana Cedis (used for COGS / profit reporting).",
-    aliases: ["costprice", "unitcost", "cost", "purchaseprice", "buyprice", "pricecost"],
+    aliases: ["costprice", "cost price", "unitcost", "unit cost", "cost", "purchaseprice", "purchase price", "buyprice", "buy price", "buyingprice", "buying price", "pricecost"],
   },
   {
     key: "manufacturingDate",
@@ -212,7 +212,7 @@ export const COLUMNS: ColumnDef[] = [
     required: false,
     kind: "date",
     hint: "Required when Initial Quantity > 0. Used for FEFO (DD/MM/YYYY or YYYY-MM-DD).",
-    aliases: ["expirydate", "expiry", "expirationdate", "expdate", "dateofexpiry", "expireson"],
+    aliases: ["expirydate", "expiry date", "expiry", "expirationdate", "expiration date", "expdate", "exp date", "dateofexpiry", "expireson", "expiry_date"],
   },
   {
     key: "supplier",
@@ -262,6 +262,7 @@ const HEADER_LOOKUP: Map<string, FieldKey> = (() => {
  */
 export function normalizeHeader(raw: unknown): string {
   return String(raw ?? "")
+    .trim()
     .replace(/\(.*?\)|\[.*?\]/g, " ")
     .replace(/^[\s*#:]+|[\s*#:]+$/g, "")
     .toLowerCase()

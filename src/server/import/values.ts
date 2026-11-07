@@ -7,7 +7,7 @@
  * silently mangled. Prices are always Ghana Cedi amounts - never converted.
  */
 
-export type CoerceResult<T> = { ok: true; value: T } | { ok: false; reason: string };
+export type CoerceResult<T> = { ok: true; value: T; unit?: string | null; original?: string | null } | { ok: false; reason: string };
 
 const PRICE_RE = /^\d+(?:\.\d+)?$/;
 const TRUE_WORDS = new Set(["true", "yes", "y", "t", "1", "required", "rx", "on"]);
@@ -21,35 +21,106 @@ export function toText(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
-/** Strict money parsing: plain numbers only, in Ghana Cedis, >= 0. */
-export function toPrice(value: unknown, label: string, options: { required: boolean }): CoerceResult<number | null> {
+/** Extract a selling unit hint from a price description, when present. */
+export function extractPriceUnit(text: string): string | null {
+  const lower = String(text || "").toLowerCase();
+  if (/pesewa/.test(lower)) return "pesewa";
+  if (/tab(let)?s?/.test(lower)) return "tablet";
+  if (/bottle(s)?/.test(lower)) return "bottle";
+  if (/pack(s)?/.test(lower)) return "pack";
+  if (/strip(s)?/.test(lower)) return "strip";
+  if (/\/\s*1\b|\bper\s*1\b|\bper\s*one\b/.test(lower)) return "unit";
+  return null;
+}
+
+/**
+ * Money parsing for Ghanaian currency formats and unit-based price descriptions.
+ */
+export function parsePrice(
+  value: unknown,
+  label: string
+): CoerceResult<number | null> & { unit?: string | null; original?: string | null } {
   if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) {
-    if (options.required) return { ok: false, reason: `${label} is required.` };
-    return { ok: true, value: null };
+    return { ok: true, value: null, unit: null, original: typeof value === "string" ? value.trim() : null };
   }
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return { ok: false, reason: `${label} must be a valid number.` };
     if (value < 0) return { ok: false, reason: `${label} must not be negative (received ${value}).` };
-    return { ok: true, value: Math.round(value * 100) / 100 };
+    if (value > 999999999.99) return { ok: false, reason: `${label} is out of range.` };
+    return { ok: true, value: Math.round(value * 100) / 100, unit: null, original: String(value) };
   }
 
-  const text = String(value).trim();
-  if (!PRICE_RE.test(text)) {
+  const original = String(value).trim().replace(/\s+/g, " ");
+  if (original === "") {
+    return { ok: true, value: null, unit: null, original };
+  }
+
+  const unit = extractPriceUnit(original);
+
+  const pesewaMatch = original.match(/(\d+(?:\.\d+)?)\s*pesewas?/i);
+  if (pesewaMatch) {
+    const parsed = Number(pesewaMatch[1]);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return { ok: false, reason: `${label} must not be negative (received "${original}").` };
+    }
+    const amount = parsed / 100;
+    if (amount > 999999999.99) return { ok: false, reason: `${label} is out of range.` };
+    return { ok: true, value: Math.round(amount * 100) / 100, unit: "pesewa", original };
+  }
+
+  let working = original;
+  const currencyTokens = ["gh₵", "₵", "ghs", "gh", "¢", "cedi", "cedis", "ghc"];
+  for (const token of currencyTokens.sort((a, b) => b.length - a.length)) {
+    working = working.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ");
+  }
+  working = working.replace(/\s+/g, " ").trim();
+
+  const numberMatch = working.match(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)/);
+  if (!numberMatch) {
     return {
       ok: false,
-      reason: `${label} must be a plain number in GH\u20B5 (received "${text}" - currency symbols, letters, thousands separators and negative values are not accepted).`,
+      reason: `${label} must be a valid Ghana Cedi amount (received "${original}" - no numeric amount found).`,
     };
   }
 
-  const parsed = Number(text);
+  const normalized = numberMatch[1].replace(/,/g, "");
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return { ok: false, reason: `${label} must not be negative.` };
+    return { ok: false, reason: `${label} must not be negative (received "${original}").` };
   }
   if (parsed > 999999999.99) {
     return { ok: false, reason: `${label} is out of range.` };
   }
-  return { ok: true, value: Math.round(parsed * 100) / 100 };
+
+  const leftover = working
+    .replace(numberMatch[1], " ")
+    .replace(/[\/.,\s]/g, "")
+    .replace(/[0-9]/g, "")
+    .replace(/per|tab(let)?s?|bottle(s)?|pack(s)?|strip(s)?|unit(s)?/gi, "");
+  if (leftover.trim() !== "") {
+    return {
+      ok: false,
+      reason: `${label} has an unrecognized format (received "${original}").`,
+    };
+  }
+
+  return { ok: true, value: Math.round(parsed * 100) / 100, unit, original };
+}
+
+/** Strict money parsing: supports Ghanaian currency formats and unit descriptions. */
+export function toPrice(
+  value: unknown,
+  label: string,
+  options: { required: boolean }
+): CoerceResult<number | null> {
+  const result = parsePrice(value, label);
+  if (!result.ok) return result;
+  if (result.value === null) {
+    if (options.required) return { ok: false, reason: `${label} is required.` };
+    return { ok: true, value: null, unit: result.unit, original: result.original } as any;
+  }
+  return { ok: true, value: result.value, unit: result.unit, original: result.original } as any;
 }
 
 /** Whole-number parsing (quantities, pack size, reorder level). */
@@ -67,9 +138,9 @@ export function toInteger(
   if (typeof value === "number") {
     parsed = value;
   } else {
-    const text = String(value).trim();
-    if (!/^[+-]?\d+$/.test(text)) {
-      return { ok: false, reason: `${label} must be a whole number (received "${text}").` };
+    const text = String(value).trim().replace(/,/g, "");
+    if (!/^[+-]?(\d+(?:\.\d+)?)$/.test(text)) {
+      return { ok: false, reason: `${label} must be a whole number (received "${String(value).trim()}").` };
     }
     parsed = Number(text);
   }

@@ -45,6 +45,8 @@ export interface ImportPreviewResponse {
   fileName: string;
   sheetName: string;
   headerRowNumber: number;
+  headers: string[];
+  columnMapping: Array<{ index: number; header: string; field: string | null }>;
   mode: ImportMode;
   fileSizeBytes: number;
   maxRows: number;
@@ -139,7 +141,7 @@ async function loadReferenceData(): Promise<ReferenceData> {
   const [categories, suppliers, products] = await Promise.all([
     db.select({ id: schema.categories.id, name: schema.categories.name }).from(schema.categories),
     db.select({ id: schema.suppliers.id, name: schema.suppliers.name }).from(schema.suppliers),
-    db.select({ sku: schema.products.sku, barcode: schema.products.barcode }).from(schema.products),
+    db.select({ sku: schema.products.sku, barcode: schema.products.barcode, name: schema.products.name }).from(schema.products),
   ]);
 
   const reference: ReferenceData = {
@@ -147,11 +149,17 @@ async function loadReferenceData(): Promise<ReferenceData> {
     suppliers: new Map(suppliers.map((s) => [s.name.trim().toLowerCase(), s])),
     existingSkus: new Map(),
     existingBarcodes: new Map(),
+    existingNames: new Map(),
   };
 
   for (const product of products) {
     if (product.sku) reference.existingSkus.set(product.sku.trim().toLowerCase(), product.sku.trim());
     if (product.barcode) reference.existingBarcodes.set(product.barcode.trim().toLowerCase(), product.barcode.trim());
+    if (product.name) {
+      const normalized = product.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (!reference.existingNames) reference.existingNames = new Map();
+      if (!reference.existingNames.has(normalized)) reference.existingNames.set(normalized, product.name.trim());
+    }
   }
 
   return reference;
@@ -175,6 +183,12 @@ export async function previewImport(
     fileName: workbook.fileName,
     sheetName: workbook.sheetName,
     headerRowNumber: workbook.headerRowNumber,
+    headers: workbook.headers,
+    columnMapping: workbook.headers.map((header, index) => ({
+      index,
+      header,
+      field: workbook.mapping.columnIndexToKey.get(index) ?? null,
+    })),
     mode: "ADD_NEW",
     fileSizeBytes: file.buffer.length,
     maxRows: MAX_ROWS,

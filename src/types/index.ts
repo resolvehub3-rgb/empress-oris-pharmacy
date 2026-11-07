@@ -307,6 +307,8 @@ export interface ImportPreviewResult {
   fileName: string;
   sheetName: string;
   headerRowNumber: number;
+  headers?: string[];
+  columnMapping?: Array<{ index: number; header: string; field: string | null }>;
   mode: "ADD_NEW";
   fileSizeBytes: number;
   maxRows: number;

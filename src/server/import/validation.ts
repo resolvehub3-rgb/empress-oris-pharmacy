@@ -12,6 +12,11 @@ import { toBoolean, toInteger, toPrice, toText, toDate, todayIso } from "./value
 
 export type RowStatus = "READY" | "DUPLICATE" | "INVALID";
 
+/** Normalize a product name for duplicate detection (trim, collapse whitespace, lower-case). */
+export function normalizeProductName(name: string | null | undefined): string {
+  return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export interface ValidatedRow {
   rowNumber: number;
   status: RowStatus;
@@ -61,6 +66,8 @@ export interface ReferenceData {
   existingSkus: Map<string, string>;
   /** lower-cased existing product barcodes -> stored barcode */
   existingBarcodes: Map<string, string>;
+  /** normalized existing product names -> stored name */
+  existingNames?: Map<string, string>;
 }
 
 export interface ValidationSummary {
@@ -124,8 +131,10 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
 
   const seenSkus = new Set<string>(); // lower-cased SKUs already accepted in this file
   const seenBarcodes = new Set<string>();
+  const seenNames = new Set<string>(); // normalized product names already accepted in this file
   const seenSkuRows = new Map<string, number>();
   const seenBarcodeRows = new Map<string, number>();
+  const seenNameRows = new Map<string, number>();
   const takenSkus = new Set<string>(reference.existingSkus.keys());
 
   const newCategoryNames = new Map<string, string>(); // lower -> display name
@@ -172,6 +181,13 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     const sellingPriceResult = toPrice(raw.sellingPrice, "Selling Price", { required: true });
     if (!sellingPriceResult.ok) errors.push(sellingPriceResult.reason);
     const sellingPrice = sellingPriceResult.ok ? sellingPriceResult.value : null;
+    if (sellingPriceResult.ok && sellingPriceResult.unit && sellingPriceResult.original && sellingPriceResult.original !== String(sellingPrice)) {
+      notes.push(
+        `Selling price interpreted as GH₵${(sellingPrice ?? 0).toFixed(2)} per ${sellingPriceResult.unit} (original value: "${sellingPriceResult.original}").`
+      );
+    } else if (sellingPriceResult.ok && sellingPriceResult.original && !/^\d+(?:\.\d+)?$/.test(sellingPriceResult.original)) {
+      notes.push(`Original selling price value preserved for audit: "${sellingPriceResult.original}".`);
+    }
 
     const wholesalePriceResult = toPrice(raw.wholesalePrice, "Wholesale Price", { required: false });
     if (!wholesalePriceResult.ok) errors.push(wholesalePriceResult.reason);
@@ -180,6 +196,13 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     const costPriceResult = toPrice(raw.costPrice, "Cost Price", { required: false });
     if (!costPriceResult.ok) errors.push(costPriceResult.reason);
     const costPrice = costPriceResult.ok ? costPriceResult.value : null;
+    if (costPriceResult.ok && costPriceResult.unit && costPriceResult.original && costPriceResult.original !== String(costPrice)) {
+      notes.push(
+        `Cost price interpreted as GH₵${(costPrice ?? 0).toFixed(2)} per ${costPriceResult.unit} (original value: "${costPriceResult.original}").`
+      );
+    } else if (costPriceResult.ok && costPriceResult.original && !/^\d+(?:\.\d+)?$/.test(costPriceResult.original)) {
+      notes.push(`Original cost price value preserved for audit: "${costPriceResult.original}".`);
+    }
 
     // --- Integers ------------------------------------------------------
     const packSizeResult = toInteger(raw.packSize, "Pack Size", { required: false, min: 1, max: 100000, fallback: 1 });
@@ -190,9 +213,13 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     if (!reorderResult.ok) errors.push(reorderResult.reason);
     const reorderLevel = reorderResult.ok ? (reorderResult.value ?? 10) : 10;
 
+    const quantityMissing = raw.initialQuantity === null || raw.initialQuantity === undefined || (typeof raw.initialQuantity === "string" && raw.initialQuantity.trim() === "");
     const quantityResult = toInteger(raw.initialQuantity, "Initial Quantity", { required: false, min: 0, max: 100000000, fallback: 0 });
     if (!quantityResult.ok) errors.push(quantityResult.reason);
     const initialQuantity = quantityResult.ok ? (quantityResult.value ?? 0) : 0;
+    if (quantityMissing) {
+      warnings.push("Initial Quantity is missing - product will be imported without opening stock.");
+    }
 
     // --- Boolean -------------------------------------------------------
     const rxResult = toBoolean(raw.prescriptionRequired, "Prescription Required");
@@ -220,6 +247,10 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
       }
     } else if (batchNumber || expiryDate) {
       notes.push("Batch information ignored because Initial Quantity is 0 or blank.");
+    }
+
+    if (hasStock && costPrice === null) {
+      warnings.push("Cost Price (Buying Price) is missing - the opening batch will use GH₵0.00 cost.");
     }
 
     const supplierName = toText(raw.supplier);
@@ -268,6 +299,21 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
 
     // --- Duplicate detection ------------------------------------------
     let status: RowStatus = errors.length > 0 ? "INVALID" : "READY";
+
+    const normalizedName = normalizeProductName(name);
+
+    // Name-based duplicate detection (exact normalized name, never fuzzy merges).
+    if (status === "READY" && normalizedName) {
+      const dbName = reference.existingNames?.get(normalizedName);
+      if (dbName) {
+        status = "DUPLICATE";
+        errors.push(`A product with this name already exists in the system ("${dbName}").`);
+      } else if (seenNames.has(normalizedName)) {
+        status = "DUPLICATE";
+        errors.push(`Duplicate product name inside this spreadsheet (first used on row ${seenNameRows.get(normalizedName)}).`);
+      }
+    }
+
     if (status === "READY" && sku) {
       const skuKey = sku.toLowerCase();
       const dbMatch = reference.existingSkus.get(skuKey);
@@ -302,6 +348,10 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
       if (barcode) {
         seenBarcodes.add(barcode.toLowerCase());
         seenBarcodeRows.set(barcode.toLowerCase(), parsedRow.rowNumber);
+      }
+      if (normalizedName) {
+        seenNames.add(normalizedName);
+        seenNameRows.set(normalizedName, parsedRow.rowNumber);
       }
       if (hasStock) {
         withStockCount++;
@@ -372,6 +422,7 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
       if (row.hasStock) withStockCount--;
       if (row.sku) seenSkus.delete(row.sku.toLowerCase());
       if (row.barcode) seenBarcodes.delete(row.barcode.toLowerCase());
+      if (row.name) seenNames.delete(normalizeProductName(row.name));
     }
   }
 

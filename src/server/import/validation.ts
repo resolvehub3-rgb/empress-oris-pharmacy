@@ -178,15 +178,27 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     }
 
     // --- Prices --------------------------------------------------------
-    const sellingPriceResult = toPrice(raw.sellingPrice, "Selling Price", { required: true });
-    if (!sellingPriceResult.ok) errors.push(sellingPriceResult.reason);
-    const sellingPrice = sellingPriceResult.ok ? sellingPriceResult.value : null;
-    if (sellingPriceResult.ok && sellingPriceResult.unit && sellingPriceResult.original && sellingPriceResult.original !== String(sellingPrice)) {
+    const sellingPriceMissing =
+      raw.sellingPrice === null ||
+      raw.sellingPrice === undefined ||
+      (typeof raw.sellingPrice === "string" && raw.sellingPrice.trim() === "");
+    const sellingPriceResult = toPrice(raw.sellingPrice, "Selling Price", { required: false });
+    let sellingPrice: number | null = null;
+    if (sellingPriceMissing) {
+      sellingPrice = 0;
+      warnings.push("Selling Price is missing - set to GH₵0.00. Update before selling.");
+    } else if (!sellingPriceResult.ok) {
+      errors.push(sellingPriceResult.reason);
+      sellingPrice = null;
+    } else {
+      sellingPrice = sellingPriceResult.value ?? 0;
+      if (sellingPriceResult.unit && sellingPriceResult.original && sellingPriceResult.original !== String(sellingPrice)) {
       notes.push(
         `Selling price interpreted as GH₵${(sellingPrice ?? 0).toFixed(2)} per ${sellingPriceResult.unit} (original value: "${sellingPriceResult.original}").`
       );
-    } else if (sellingPriceResult.ok && sellingPriceResult.original && !/^\d+(?:\.\d+)?$/.test(sellingPriceResult.original)) {
+    } else if (sellingPriceResult.original && !/^\d+(?:\.\d+)?$/.test(sellingPriceResult.original)) {
       notes.push(`Original selling price value preserved for audit: "${sellingPriceResult.original}".`);
+    }
     }
 
     const wholesalePriceResult = toPrice(raw.wholesalePrice, "Wholesale Price", { required: false });

@@ -237,20 +237,24 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
 
     // --- Cross-field inventory rules (mirror the Add Product workflow) --
     const batchNumber = toText(raw.batchNumber);
-    const hasStock = initialQuantity > 0;
+    // Opening stock can only be initialized when batch/expiry data is present.
+    // Rows with a quantity but missing batch/expiry are imported as products only
+    // (no stock is fabricated) and the quantity is preserved for later review.
+    const hasStock = initialQuantity > 0 && !!batchNumber && !!expiryDate;
+    if (initialQuantity > 0 && (!batchNumber || !expiryDate)) {
+      warnings.push(
+        "Opening quantity recorded but stock not initialized because Batch Number/Expiry Date is missing. Product will be imported without stock; add stock later via Add Stock."
+      );
+    }
     if (hasStock) {
-      if (!batchNumber) {
-        errors.push("Batch Number is required when Initial Quantity is greater than 0 (pharmaceutical batch tracking / FEFO).");
-      }
-      if (!expiryDate) {
-        errors.push("Expiry Date is required when Initial Quantity is greater than 0 (pharmaceutical stock).");
-      }
+      // batch/expiry already present (validated above)
     } else if (batchNumber || expiryDate) {
       notes.push("Batch information ignored because Initial Quantity is 0 or blank.");
     }
 
-    if (hasStock && costPrice === null) {
-      warnings.push("Cost Price (Buying Price) is missing - the opening batch will use GH₵0.00 cost.");
+    const costPriceMissing = raw.costPrice === null || raw.costPrice === undefined || (typeof raw.costPrice === "string" && raw.costPrice.trim() === "");
+    if (costPrice === null && costPriceMissing) {
+      warnings.push("Cost Price (Buying Price) is missing - the product will be imported without cost data.");
     }
 
     const supplierName = toText(raw.supplier);
@@ -386,7 +390,7 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
       initialQuantity,
       hasStock,
       batchNumber: hasStock ? batchNumber : null,
-      costPrice: hasStock ? costPrice : null,
+      costPrice,
       manufacturingDate: hasStock ? manufacturingDate : null,
       expiryDate: hasStock ? expiryDate : null,
       supplierName,

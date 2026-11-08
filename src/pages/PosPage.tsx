@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { Product, CartItem, Category } from "../types";
 import { apiRequest } from "../lib/api";
+import { isOnline } from "../lib/offlineSync";
+import { queuePendingSale, getCachedProducts, idbPut } from "../lib/offlineDb";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 import { ReceiptModal } from "../components/ReceiptModal";
@@ -273,6 +275,64 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
         transactionReference: transactionRef.trim() || null,
         discount: discountAmount,
       };
+
+      // Offline cash sale: save locally and queue for sync
+      if (!isOnline() && paymentMethod === "CASH") {
+        const offlineSaleId = `OFF-${crypto.randomUUID()}`;
+        const receipt = {
+          id: offlineSaleId,
+          receipt_number: offlineSaleId,
+          cashier_id: null,
+          shift_id: null,
+          subtotal: subtotal ?? 0,
+          discount: discountAmount,
+          total_amount: grandTotal,
+          total_cost: 0,
+          status: "PENDING_SYNC",
+          created_at: new Date().toISOString(),
+          items: cart.map((item) => ({
+            product_id: item.product.id,
+            product_name: item.product.name,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            total_price: item.unitPrice * item.quantity - item.discount,
+          })),
+          payment_method: "CASH",
+          amount_received: amtReceivedNum,
+          change_given: Math.max(0, amtReceivedNum - grandTotal),
+        };
+
+        await queuePendingSale({
+          id: offlineSaleId,
+          receipt_number: offlineSaleId,
+          payload: { ...payload, offlineSaleId },
+          created_at: new Date().toISOString(),
+        });
+
+        // Best-effort local stock decrement in cached products
+        try {
+          const cached = await getCachedProducts();
+          const updated = cached.map((p: any) => {
+            const cartItem = cart.find((c) => c.product.id === p.id);
+            if (cartItem) {
+              return { ...p, totalStock: Math.max(0, (p.totalStock || 0) - cartItem.quantity) };
+            }
+            return p;
+          });
+          await idbPut("products", updated[0]); // noop-ish; real cache update below
+          // Update all cached products
+          for (const p of updated) await idbPut("products", p);
+        } catch {
+          // ignore cache errors
+        }
+
+        setReceiptData(receipt as any);
+        setShowReceiptModal(true);
+        setShowPaymentModal(false);
+        clearCart();
+        setCheckoutLoading(false);
+        return;
+      }
 
       const res = await apiRequest<{ success: boolean; receipt: any }>("/api/pos/checkout", {
         method: "POST",

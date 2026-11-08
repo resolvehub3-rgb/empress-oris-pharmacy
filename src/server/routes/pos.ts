@@ -144,6 +144,7 @@ posRouter.post("/checkout", requireAuthentication, async (req: Request, res: Res
     transactionReference,
     discount = 0,
     notes,
+    offlineSaleId, // optional client-generated id for idempotent offline sync
   } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -152,6 +153,10 @@ posRouter.post("/checkout", requireAuthentication, async (req: Request, res: Res
 
   if (!paymentMethod) {
     return res.status(400).json({ error: "Payment method is required." });
+  }
+
+  if (offlineSaleId && paymentMethod !== "CASH") {
+    return res.status(400).json({ error: "Offline sales are cash-only." });
   }
 
   try {
@@ -173,8 +178,16 @@ posRouter.post("/checkout", requireAuthentication, async (req: Request, res: Res
     // 2. Fetch Pharmacy Settings for Receipt
     const [pharmacy] = await db.select().from(schema.pharmacySettings).limit(1);
 
+    // Idempotency: if this offline sale was already synced, return the existing record.
+    if (offlineSaleId) {
+      const [existing] = await rawSql.unsafe(`SELECT * FROM sales WHERE receipt_number = '${offlineSaleId}' LIMIT 1`);
+      if (existing) {
+        return res.json({ success: true, receipt: existing, alreadySynced: true });
+      }
+    }
+
     // 3. Execute Sale Transaction with Row Locks
-    const receiptNumber = `GH-REC-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const receiptNumber = offlineSaleId ? String(offlineSaleId) : `GH-REC-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const result = await rawSql.begin(async (tx) => {
       let subtotal = 0;

@@ -180,6 +180,119 @@ shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Res
       )
     `);
 
+    // ---- SMS shift-closing notification (transactional outbox) ----
+    // This must never delay or invalidate the successful shift closure.
+    try {
+      const [settings] = await rawSql.unsafe(`SELECT name, sms_notifications_enabled, sms_recipient_phone, phone FROM pharmacy_settings LIMIT 1`);
+      const [cashier] = await rawSql.unsafe(`SELECT full_name FROM users WHERE id = '${activeShift.cashier_id}' LIMIT 1`);
+
+      const pharmacyName = settings?.name || "Empress Oris Pharmacy";
+      const cashierName = cashier?.full_name || "Cashier";
+      const recipient = settings?.sms_recipient_phone || settings?.phone;
+
+      // Product-level sales for this shift
+      const productRows = await rawSql.unsafe(`
+        SELECT p.name as product_name,
+               COALESCE(SUM(si.quantity), 0)::integer as qty_sold,
+               COALESCE(SUM(si.total_price), 0)::numeric(12,2) as sales_value,
+               COALESCE(SUM(si.quantity * si.unit_cost), 0)::numeric(12,2) as cogs
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        JOIN products p ON p.id = si.product_id
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+        GROUP BY p.name
+        ORDER BY sales_value DESC
+      `);
+
+      const [totals] = await rawSql.unsafe(`
+        SELECT COUNT(s.id)::integer as txn_count,
+               COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as total_revenue,
+               COALESCE(SUM(s.discount), 0)::numeric(12,2) as total_discount
+        FROM sales s
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+      `);
+
+      const payments = await rawSql.unsafe(`
+        SELECT pmt.payment_method, COALESCE(SUM(pmt.amount), 0)::numeric(12,2) as amount
+        FROM payments pmt
+        JOIN sales s ON s.id = pmt.sale_id
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+        GROUP BY pmt.payment_method
+      `);
+
+      const totalRevenue = parseFloat(totals?.total_revenue || "0");
+      const totalDiscount = parseFloat(totals?.total_discount || "0");
+      const totalCogs = productRows.reduce((sum: number, r: any) => sum + parseFloat(r.cogs || "0"), 0);
+      const grossProfit = totalRevenue - totalCogs;
+
+      const paymentLines = payments.map((p: any) => `${p.payment_method}: GH₵${parseFloat(p.amount).toFixed(2)}`).join("\\n");
+
+      const productLines = productRows.map((r: any) =>
+        `${r.product_name} x${r.qty_sold} | Sales GH₵${parseFloat(r.sales_value).toFixed(2)} | COGS GH₵${parseFloat(r.cogs).toFixed(2)} | Profit GH₵${(parseFloat(r.sales_value) - parseFloat(r.cogs)).toFixed(2)}`
+      ).join("\\n");
+
+      const report = [
+        "EMPRESS ORIS PHARMACY",
+        "SHIFT CLOSING REPORT",
+        "",
+        `Pharmacy: ${pharmacyName}`,
+        `Cashier: ${cashierName}`,
+        `Date: ${new Date().toLocaleDateString("en-GB")}`,
+        `Shift: ${activeShift.id}`,
+        "",
+        "PRODUCTS SOLD:",
+        productLines || "No products sold",
+        "",
+        "FINANCIAL SUMMARY:",
+        `Total Sales Revenue: GH₵${totalRevenue.toFixed(2)}`,
+        `Total Discounts: GH₵${totalDiscount.toFixed(2)}`,
+        `Cost of Goods Sold: GH₵${totalCogs.toFixed(2)}`,
+        `Gross Profit: GH₵${grossProfit.toFixed(2)}`,
+        `Total Transactions: ${totals?.txn_count || 0}`,
+        paymentLines,
+        "",
+        "SHIFT STATUS: CLOSED",
+      ].join("\\n");
+
+      // Insert into outbox (idempotent via reference_id)
+      const refId = `shift-sms-${activeShift.id}`;
+      const [existing] = await rawSql.unsafe(`SELECT id FROM sms_outbox WHERE reference_id = '${refId}' LIMIT 1`);
+      if (!existing) {
+        const [outboxRow] = await rawSql.unsafe(`
+          INSERT INTO sms_outbox (event_type, recipient, message, status, reference_id)
+          VALUES ('SHIFT_CLOSED', ${recipient ? `'${recipient}'` : "NULL"}, '${report.replace(/'/g, "''")}', 'PENDING', '${refId}')
+          RETURNING id
+        `);
+
+        // Asynchronous processing (fire-and-forget)
+        if (outboxRow?.id) {
+          (async () => {
+            try {
+              if (!settings?.sms_notifications_enabled) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SKIPPED', last_error = 'SMS disabled by owner' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              if (!recipient) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', last_error = 'No recipient phone configured' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              const { sendSms } = await import("../../services/sasuSync");
+              const result = await sendSms(recipient, report);
+              if (result.success) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW() WHERE id = '${outboxRow.id}'`);
+              } else {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+              }
+            } catch (e: any) {
+              await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(e?.message || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+            }
+          })();
+        }
+      }
+    } catch (smsErr: any) {
+      console.error("[Shift SMS] Failed to queue SMS:", smsErr);
+    }
+
     await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: activeShift.cashier_id, status: "CLOSED" });
 
     return res.json({

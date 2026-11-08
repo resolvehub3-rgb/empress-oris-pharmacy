@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS pharmacy_settings (
   tax_rate NUMERIC(5, 2) DEFAULT 0.00,
   logo_url TEXT,
   receipt_footer TEXT DEFAULT 'Thank you for your patronage! Medicines sold are not returnable once opened.',
+  sms_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  sms_recipient_phone TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -336,6 +338,21 @@ CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales(receipt_number);
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_product_imports_created_at ON product_imports(created_at DESC);
+
+-- SMS notification outbox
+CREATE TABLE IF NOT EXISTS sms_outbox (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  reference_id TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_sms_outbox_status ON sms_outbox(status);
 
 -- Migration: add unique constraint on reference_id if missing
 -- Guard on pg_constraint first: re-running ALTER TABLE ... UNIQUE on an

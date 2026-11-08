@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
 import { eq, isNotNull } from "drizzle-orm";
-import { getDb, schema } from "../../db";
+import { getDb, getRawSql, schema } from "../../db";
 import { requireAuthentication, requireRole } from "../middleware/auth";
 import { uploadImageToStorage, broadcastRealtimeEvent } from "../../services/supabase";
 
@@ -47,7 +47,7 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });
 
-  const { name, licenseNumber, phone, email, address, city, region, currency, currencySymbol, taxRate, receiptFooter, logoUrl } = req.body;
+  const { name, licenseNumber, phone, email, address, city, region, currency, currencySymbol, taxRate, receiptFooter, logoUrl, smsNotificationsEnabled, smsRecipientPhone } = req.body;
 
   try {
     const existing = await db.select().from(schema.pharmacySettings).limit(1);
@@ -70,6 +70,8 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
           taxRate: taxRate ? parseFloat(taxRate).toFixed(2) : "0.00",
           receiptFooter,
           logoUrl,
+          smsNotificationsEnabled: smsNotificationsEnabled !== undefined ? !!smsNotificationsEnabled : false,
+          smsRecipientPhone: smsRecipientPhone !== undefined ? smsRecipientPhone : null,
         })
         .returning();
     } else {
@@ -88,6 +90,8 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
           taxRate: taxRate !== undefined ? parseFloat(taxRate).toFixed(2) : existing[0].taxRate,
           receiptFooter,
           logoUrl: logoUrl !== undefined ? logoUrl : existing[0].logoUrl,
+          smsNotificationsEnabled: smsNotificationsEnabled !== undefined ? !!smsNotificationsEnabled : existing[0].smsNotificationsEnabled,
+          smsRecipientPhone: smsRecipientPhone !== undefined ? smsRecipientPhone : existing[0].smsRecipientPhone,
           updatedAt: new Date(),
         })
         .where(eq(schema.pharmacySettings.id, existing[0].id))
@@ -110,6 +114,52 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
     return res.status(500).json({ error: err.message || "Failed to update pharmacy settings" });
   }
 });
+
+// SMS delivery history (owner only)
+settingsRouter.get(
+  "/sms-history",
+  requireAuthentication,
+  requireRole(["OWNER"]),
+  async (req: Request, res: Response) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    try {
+      const rows = await rawSql.unsafe(`SELECT * FROM sms_outbox ORDER BY created_at DESC LIMIT 100`);
+      return res.json({ history: rows });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to fetch SMS history" });
+    }
+  }
+);
+
+// Retry failed SMS (owner only)
+settingsRouter.post(
+  "/sms-retry/:id",
+  requireAuthentication,
+  requireRole(["OWNER"]),
+  async (req: Request, res: Response) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    const { id } = req.params;
+    try {
+      const [row] = await rawSql.unsafe(`SELECT * FROM sms_outbox WHERE id = '${id}' LIMIT 1`);
+      if (!row) return res.status(404).json({ error: "SMS record not found." });
+      if (row.status === "SENT") return res.json({ success: true, message: "Already sent." });
+
+      const { sendSms } = await import("../../services/sasuSync");
+      const result = await sendSms(row.recipient, row.message);
+      if (result.success) {
+        await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW(), last_error = NULL WHERE id = '${id}'`);
+        return res.json({ success: true });
+      } else {
+        await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown").replace(/'/g, "''")}' WHERE id = '${id}'`);
+        return res.status(502).json({ success: false, error: result.error });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Retry failed" });
+    }
+  }
+);
 
 // Upload Pharmacy Logo to Supabase Storage
 settingsRouter.post(

@@ -51,6 +51,8 @@ export const pharmacySettings = pgTable("pharmacy_settings", {
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).default("0.00"),
   logoUrl: text("logo_url"),
   receiptFooter: text("receipt_footer").default("Thank you for your patronage! Medicines sold are not returnable once opened."),
+  smsNotificationsEnabled: boolean("sms_notifications_enabled").default(false).notNull(),
+  smsRecipientPhone: text("sms_recipient_phone"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -331,6 +333,20 @@ export const productImports = pgTable("product_imports", {
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
+});
+
+// SMS notification outbox (transactional outbox for shift-closing SMS)
+export const smsOutbox = pgTable("sms_outbox", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventType: text("event_type").notNull(),
+  recipient: text("recipient").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("PENDING"), // PENDING | SENT | FAILED
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  referenceId: text("reference_id").unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
 });
 
 export const productImportsRelations = relations(productImports, ({ one }) => ({

@@ -46,20 +46,24 @@ export function NotificationsPage() {
   }, []);
 
   const markAsRead = async (id: string) => {
-    setNotifications(notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
     try {
       await apiRequest(`/api/notifications/${id}/read`, { method: "PUT" });
+      await fetchNotifications();
     } catch (err) {
       console.warn(err);
+      await fetchNotifications();
     }
   };
 
   const markAllRead = async () => {
-    setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
     try {
       await apiRequest("/api/notifications/read-all", { method: "PUT" });
+      await fetchNotifications();
     } catch (err) {
       console.warn(err);
+      await fetchNotifications();
     }
   };
 

@@ -22,7 +22,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
         GROUP BY p.id, p.name, p.sku, p.reorder_level
         HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
         ORDER BY current_stock ASC
-        LIMIT 10
+        LIMIT 100
       `);
 
       for (const item of lowStockItems) {
@@ -33,7 +33,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
         await rawSql.unsafe(`
           INSERT INTO notifications (title, message, type, reference_id, is_read)
           VALUES ($$${title}$$, $$${message}$$, $$${type}$$, $$${refId}$$, false)
-          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
         `);
       }
     } catch (err) {
@@ -51,7 +51,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
           AND b.expiry_date >= CURRENT_DATE 
           AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
         ORDER BY b.expiry_date ASC
-        LIMIT 10
+        LIMIT 100
       `);
 
       for (const item of expiringBatches) {
@@ -61,7 +61,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
         await rawSql.unsafe(`
           INSERT INTO notifications (title, message, type, reference_id, is_read)
           VALUES ($$${title}$$, $$${message}$$, 'EXPIRING_SOON', $$${refId}$$, false)
-          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
         `);
       }
     } catch (err) {
@@ -76,7 +76,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
         JOIN products p ON b.product_id = p.id
         WHERE b.current_quantity > 0 AND b.expiry_date < CURRENT_DATE
         ORDER BY b.expiry_date DESC
-        LIMIT 10
+        LIMIT 100
       `);
 
       for (const item of expiredBatches) {
@@ -86,7 +86,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
         await rawSql.unsafe(`
           INSERT INTO notifications (title, message, type, reference_id, is_read)
           VALUES ($$${title}$$, $$${message}$$, 'EXPIRED', $$${refId}$$, false)
-          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
         `);
       }
     } catch (err) {
@@ -95,7 +95,7 @@ notificationsRouter.get("/", requireAuthentication, async (req: Request, res: Re
 
     // 4. Return all notifications from the table
     const allNotifications = await rawSql.unsafe(`
-      SELECT * FROM notifications ORDER BY is_read ASC, created_at DESC LIMIT 50
+      SELECT * FROM notifications ORDER BY is_read ASC, created_at DESC LIMIT 200
     `);
 
     return res.json({ notifications: allNotifications });

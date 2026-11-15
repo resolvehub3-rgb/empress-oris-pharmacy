@@ -19,7 +19,7 @@ export async function syncPendingSales(): Promise<{ synced: number; failed: numb
   let failed = 0;
   for (const sale of pending) {
     try {
-      await apiRequest("/api/sales/offline", { method: "POST", body: JSON.stringify({ sale }) });
+      await apiRequest("/api/pos/checkout", { method: "POST", body: JSON.stringify(sale.payload || sale) });
       await removePendingSale(sale.id);
       synced++;
     } catch (err) {

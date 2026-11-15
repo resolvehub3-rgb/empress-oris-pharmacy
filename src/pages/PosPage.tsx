@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import {
   Search,
   Barcode,
@@ -20,6 +20,7 @@ import {
 import { Product, CartItem, Category } from "../types";
 import { apiRequest } from "../lib/api";
 import { isOnline } from "../lib/offlineSync";
+import { processBarcode, normalizeBarcode } from "../services/barcodeService";
 import { queuePendingSale, getCachedProducts, idbPut } from "../lib/offlineDb";
 import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
@@ -68,7 +69,15 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   // Camera QR & Barcode Scanner State
   const [showCameraScanner, setShowCameraScanner] = useState(false);
 
+  // Scanner feedback state
+  const [scanNotice, setScanNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+  const [priceNotice, setPriceNotice] = useState<{ productName: string; oldPrice: string; newPrice: string } | null>(null);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const productsRef = useRef<Product[]>([]);
+  const lastScanRef = useRef<{ code: string; time: number }>({ code: "", time: 0 });
+  const scanBufferRef = useRef("");
+  const scanTimerRef = useRef<number | null>(null);
 
   // Load initial products and categories
   const fetchProducts = async (q = "", cat = "") => {
@@ -104,11 +113,24 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
     fetchProducts(searchQuery, selectedCategory);
   }, [selectedCategory]);
 
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
   // Keep the latest search parameters for the realtime refetch closure.
   const searchParamsRef = useRef({ query: "", category: "" });
   useEffect(() => {
     searchParamsRef.current = { query: searchQuery, category: selectedCategory };
   }, [searchQuery, selectedCategory]);
+
+  const priceMapRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const next: Record<string, string> = { ...priceMapRef.current };
+    for (const p of products) {
+      next[p.id] = String(p.sellingPrice ?? (p as any).selling_price ?? "0");
+    }
+    priceMapRef.current = next;
+  }, [products]);
 
   // Supabase Realtime: newly imported products and stock changes appear in the
   // POS immediately - without any manual page reload. Bursts of events (a bulk
@@ -116,7 +138,19 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   // catalog is not re-queried and re-rendered over and over mid-sale.
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const unsubscribe = subscribeToPharmacyRealtime((event) => {
+    const unsubscribe = subscribeToPharmacyRealtime((event, payload) => {
+      if (event === "PRODUCT_UPDATED" && payload?.product) {
+        const p = payload.product;
+        const id = p.id;
+        const newPrice = String(p.sellingPrice ?? p.selling_price ?? "0");
+        const oldPrice = priceMapRef.current[id];
+        const name = p.name;
+        if (oldPrice && oldPrice !== newPrice) {
+          setPriceNotice({ productName: name, oldPrice, newPrice });
+          window.setTimeout(() => setPriceNotice(null), 6000);
+        }
+      }
+
       if (event === "PRODUCT_CREATED" || event === "PRODUCT_UPDATED" || event === "STOCK_UPDATED") {
         if (refreshTimerRef.current) return;
         refreshTimerRef.current = setTimeout(() => {
@@ -149,8 +183,8 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
           addToCart(p);
           setBarcodeInput("");
         } else {
-          // search regular query
-          fetchProducts(barcodeInput.trim());
+          setScanNotice({ type: "error", text: "Product not found. Please check the barcode or register this product first." });
+          window.setTimeout(() => setScanNotice(null), 4000);
         }
       } catch (err) {
         console.warn(err);
@@ -160,30 +194,47 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
 
   // Cart Operations
   const addToCart = (product: Product) => {
-    const existingIndex = cart.findIndex((item) => item.product.id === product.id);
-    const availableStock = product.totalStock || 0;
-
-    if (availableStock <= 0) {
-      alert(`"${product.name}" is out of stock!`);
+    const isActive = (product as any).isActive ?? (product as any).is_active;
+    if (isActive === false) {
+      setScanNotice({ type: "error", text: `"${product.name}" is inactive and cannot be sold.` });
+      window.setTimeout(() => setScanNotice(null), 4000);
       return;
     }
 
-    if (existingIndex > -1) {
-      const currentQty = cart[existingIndex].quantity;
-      if (currentQty + 1 > availableStock) {
-        alert(`Cannot exceed available non-expired stock of ${availableStock} units.`);
-        return;
+    const availableStock = product.totalStock || 0;
+
+    if (availableStock <= 0) {
+      setScanNotice({ type: "error", text: `"${product.name}" is out of stock!` });
+      window.setTimeout(() => setScanNotice(null), 4000);
+      return;
+    }
+
+    setCart((prev) => {
+      const existingIndex = prev.findIndex((item) => item.product.id === product.id);
+      if (existingIndex > -1) {
+        const currentQty = prev[existingIndex].quantity;
+        if (currentQty + 1 > availableStock) {
+          setScanNotice({
+            type: "error",
+            text: `Cannot exceed available non-expired stock of ${availableStock} units.`,
+          });
+          window.setTimeout(() => setScanNotice(null), 4000);
+          return prev;
+        }
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: currentQty + 1,
+          totalPrice:
+            ((currentQty + 1) * updated[existingIndex].unitPrice) -
+            updated[existingIndex].discount,
+        };
+        return updated;
       }
-      const updated = [...cart];
-      updated[existingIndex].quantity += 1;
-      updated[existingIndex].totalPrice =
-        (updated[existingIndex].quantity * updated[existingIndex].unitPrice) -
-        updated[existingIndex].discount;
-      setCart(updated);
-    } else {
+
       const unitPrice = parseFloat(product.sellingPrice || "0");
-      setCart([
-        ...cart,
+      return [
+        ...prev,
         {
           product,
           quantity: 1,
@@ -191,9 +242,93 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
           discount: 0,
           totalPrice: unitPrice,
         },
-      ]);
-    }
+      ];
+    });
   };
+
+  const handleScannedCode = useCallback(async (rawCode: string) => {
+    const code = normalizeBarcode(rawCode);
+    if (!code) return;
+    const now = Date.now();
+    if (lastScanRef.current.code === code && now - lastScanRef.current.time < 900) {
+      return;
+    }
+    lastScanRef.current = { code, time: now };
+
+    try {
+      const result = await processBarcode({
+        barcode: code,
+        mode: "cashier",
+        catalogue: productsRef.current,
+      });
+
+      if (!result.found || !result.product) {
+        setScanNotice({
+          type: "error",
+          text: result.message || "Product not found. Please check the barcode or register this product first.",
+        });
+        window.setTimeout(() => setScanNotice(null), 4000);
+        return;
+      }
+
+      addToCart(result.product);
+      setScanNotice({
+        type: "success",
+        text: `Added "${result.product.name}" to cart`,
+      });
+      window.setTimeout(() => setScanNotice(null), 2000);
+    } catch (err: any) {
+      setScanNotice({
+        type: "error",
+        text: err?.message || "Failed to process barcode.",
+      });
+      window.setTimeout(() => setScanNotice(null), 4000);
+    }
+  }, []);
+
+  // Continuous keyboard-emulation (HID) barcode scanner support.
+  // Captures scanner keystrokes only when no form control is focused, so
+  // ordinary typing in search/payment/quantity inputs is never interpreted
+  // as a barcode.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (showPaymentModal || showCameraScanner) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
+        return;
+      }
+
+      if (scanTimerRef.current) {
+        window.clearTimeout(scanTimerRef.current);
+      }
+
+      if (e.key === "Enter" || e.key === "Tab") {
+        const code = scanBufferRef.current;
+        scanBufferRef.current = "";
+        if (code.trim()) {
+          e.preventDefault();
+          void handleScannedCode(code);
+        }
+        return;
+      }
+
+      if (e.key.length === 1) {
+        scanBufferRef.current += e.key;
+        scanTimerRef.current = window.setTimeout(() => {
+          scanBufferRef.current = "";
+        }, 150);
+      }
+    };
+
+    window.addEventListener("keydown", handler, true);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+      if (scanTimerRef.current) {
+        window.clearTimeout(scanTimerRef.current);
+      }
+    };
+  }, [showPaymentModal, showCameraScanner, handleScannedCode]);
 
   const updateQuantity = (productId: string, newQty: number) => {
     if (newQty <= 0) {
@@ -374,6 +509,26 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
 
       {/* LEFT COLUMN: Product Catalog & Search (65% width on desktop) */}
       <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
+        {scanNotice && (
+          <div
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border ${
+              scanNotice.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : scanNotice.type === "error"
+                ? "bg-rose-50 border-rose-200 text-rose-800"
+                : "bg-slate-50 border-slate-200 text-slate-700"
+            }`}
+          >
+            {scanNotice.text}
+          </div>
+        )}
+
+        {priceNotice && (
+          <div className="px-3 py-2 rounded-xl text-xs font-semibold border bg-amber-50 border-amber-200 text-amber-900">
+            PRODUCT PRICE UPDATED — {priceNotice.productName}: GH₵{parseFloat(priceNotice.oldPrice).toFixed(2)} → GH₵{parseFloat(priceNotice.newPrice).toFixed(2)}
+          </div>
+        )}
+
         {/* Search & Barcode Bar */}
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row gap-2.5 items-center">
           {/* Text Search */}

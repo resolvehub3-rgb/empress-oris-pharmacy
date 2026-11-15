@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import {
   X,
   Package,
@@ -12,9 +12,13 @@ import {
   DollarSign,
   Tag,
   Building,
+  Camera,
 } from "lucide-react";
 import { Category, Supplier } from "../types";
 import { apiRequest } from "../lib/api";
+const CameraScannerModal = lazy(() =>
+  import("./CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
+);
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -78,6 +82,7 @@ export function AddProductModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
   // Auto-generate a sensible SKU if empty
   const handleGenerateSku = () => {
@@ -347,13 +352,27 @@ export function AddProductModal({
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Barcode / UPC
                 </label>
-                <input
-                  type="text"
-                  placeholder="Scan or enter barcode"
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white text-slate-900 font-mono"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Scan or enter barcode"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    className="flex-1 px-3.5 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white text-slate-900 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowBarcodeScanner(true)}
+                    className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-teal-300 font-bold text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 shrink-0"
+                    title="Scan barcode with camera"
+                  >
+                    <Camera className="w-4 h-4 text-teal-400" />
+                    <span>Scan Barcode</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Use the rear camera on mobile or a USB/Bluetooth scanner on desktop. Leading zeros are preserved.
+                </p>
               </div>
 
               <div>
@@ -797,6 +816,17 @@ export function AddProductModal({
           </button>
         </div>
       </div>
+
+      {showBarcodeScanner && (
+        <Suspense fallback={null}>
+          <CameraScannerModal
+            isOpen={showBarcodeScanner}
+            mode="register"
+            onClose={() => setShowBarcodeScanner(false)}
+            onBarcodeScanned={(code) => setBarcode(code)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

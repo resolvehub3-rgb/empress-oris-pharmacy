@@ -22,13 +22,17 @@ import { apiRequest } from "../lib/api";
 interface CameraScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onProductScanned: (product: Product) => void;
+  mode?: "pos" | "register";
+  onProductScanned?: (product: Product) => void;
+  onBarcodeScanned?: (barcode: string) => void;
 }
 
 export function CameraScannerModal({
   isOpen,
   onClose,
+  mode = "pos",
   onProductScanned,
+  onBarcodeScanned,
 }: CameraScannerModalProps) {
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
@@ -89,6 +93,29 @@ export function CameraScannerModal({
     setLookupLoading(true);
     setScanMessage(null);
 
+    if (mode === "register") {
+      try {
+        setLastScannedCode(decodedText);
+        setScanMessage({
+          type: "success",
+          text: `Barcode captured: ${decodedText}`,
+        });
+        onBarcodeScanned?.(decodedText);
+        if (!continuousMode) {
+          stopScanner();
+          onClose();
+        }
+      } catch (err: any) {
+        setScanMessage({
+          type: "error",
+          text: err?.message || "Failed to capture barcode.",
+        });
+      } finally {
+        setLookupLoading(false);
+      }
+      return;
+    }
+
     try {
       const res = await apiRequest<{ products: Product[] }>(
         `/api/pos/search?barcode=${encodeURIComponent(decodedText)}`
@@ -110,7 +137,7 @@ export function CameraScannerModal({
             type: "success",
             text: `Added "${found.name}" to cart (GH₵ ${parseFloat(found.sellingPrice || (found as any).selling_price || "0").toFixed(2)})`,
           });
-          onProductScanned(found);
+          onProductScanned?.(found);
         }
 
         if (!continuousMode) {

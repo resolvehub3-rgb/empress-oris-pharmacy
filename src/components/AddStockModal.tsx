@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from "react";
-import { X, Boxes, Plus, AlertCircle, CheckCircle2 } from "lucide-react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
+import { X, Boxes, Plus, AlertCircle, CheckCircle2, Camera } from "lucide-react";
 import { Product, Supplier } from "../types";
 import { apiRequest } from "../lib/api";
+const CameraScannerModal = lazy(() =>
+  import("./CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
+);
 
 interface AddStockModalProps {
   isOpen: boolean;
@@ -39,13 +42,23 @@ export function AddStockModal({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [barcode, setBarcode] = useState("");
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
   useEffect(() => {
     if (activeProduct) {
       setProductId(activeProduct.id);
       setSellingPrice(activeProduct.sellingPrice);
+      setBarcode(activeProduct.barcode || "");
     }
   }, [activeProduct]);
+
+  useEffect(() => {
+    const found = localProducts.find((p) => p.id === productId);
+    if (found) {
+      setBarcode(found.barcode || barcode);
+    }
+  }, [productId]);
 
   useEffect(() => {
     if (isOpen && localProducts.length === 0) {
@@ -96,6 +109,16 @@ export function AddStockModal({
 
     setLoading(true);
     try {
+      // If the product had no barcode, allow capturing one during restock
+      // and persist it without overwriting other product fields.
+      const existingBarcode = currentProduct?.barcode || "";
+      if (barcode.trim() && barcode.trim() !== existingBarcode) {
+        await apiRequest(`/api/products/${productId}`, {
+          method: "PUT",
+          body: JSON.stringify({ barcode: barcode.trim() }),
+        });
+      }
+
       await apiRequest("/api/stock/add", {
         method: "POST",
         body: JSON.stringify({
@@ -182,6 +205,37 @@ export function AddStockModal({
               <div className="font-semibold text-teal-700">
                 Current Stock: {currentProduct.totalStock} units
               </div>
+            </div>
+          )}
+
+          {currentProduct && !currentProduct.barcode && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Barcode (missing - scan or enter to assign)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Scan or enter barcode"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  className="flex-1 px-3.5 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowBarcodeScanner(true)}
+                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-teal-300 font-bold text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 shrink-0"
+                >
+                  <Camera className="w-4 h-4 text-teal-400" />
+                  <span>Scan Barcode</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {currentProduct && currentProduct.barcode && (
+            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900">
+              Barcode already assigned: <span className="font-mono font-bold">{currentProduct.barcode}</span>. No scan required.
             </div>
           )}
 
@@ -367,6 +421,17 @@ export function AddStockModal({
             {loading ? "Recording in Supabase..." : "Confirm & Add Stock"}
           </button>
         </div>
+
+        {showBarcodeScanner && (
+          <Suspense fallback={null}>
+            <CameraScannerModal
+              isOpen={showBarcodeScanner}
+              mode="register"
+              onClose={() => setShowBarcodeScanner(false)}
+              onBarcodeScanned={(code) => setBarcode(code)}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );

@@ -417,29 +417,41 @@ productsRouter.put(
     } = req.body;
 
     try {
+      if (barcode !== undefined && barcode) {
+        const [existingBarcode] = await db
+          .select()
+          .from(schema.products)
+          .where(eq(schema.products.barcode, String(barcode).trim()))
+          .limit(1);
+        if (existingBarcode && existingBarcode.id !== req.params.id) {
+          return res.status(400).json({ error: `A product with Barcode '${barcode}' already exists.` });
+        }
+      }
+
+      const updateData: Record<string, any> = { updatedAt: new Date() };
+
+      if (name !== undefined) updateData.name = name;
+      if (genericName !== undefined) updateData.genericName = genericName;
+      if (brandName !== undefined) updateData.brandName = brandName;
+      if (sku !== undefined) updateData.sku = sku;
+      if (barcode !== undefined) updateData.barcode = barcode ? String(barcode).trim() : null;
+      if (categoryId !== undefined) updateData.categoryId = categoryId || null;
+      if (dosageForm !== undefined) updateData.dosageForm = dosageForm;
+      if (strength !== undefined) updateData.strength = strength;
+      if (unit !== undefined) updateData.unit = unit;
+      if (packSize !== undefined) updateData.packSize = packSize ? parseInt(packSize) : 1;
+      if (manufacturer !== undefined) updateData.manufacturer = manufacturer;
+      if (description !== undefined) updateData.description = description;
+      if (prescriptionRequired !== undefined) updateData.prescriptionRequired = !!prescriptionRequired;
+      if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
+      if (reorderLevel !== undefined) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 10;
+      if (sellingPrice !== undefined) updateData.sellingPrice = sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00";
+      if (wholesalePrice !== undefined) updateData.wholesalePrice = wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null;
+      if (isActive !== undefined) updateData.isActive = !!isActive;
+
       const [updated] = await db
         .update(schema.products)
-        .set({
-          name,
-          genericName,
-          brandName,
-          sku,
-          barcode,
-          categoryId: categoryId || null,
-          dosageForm,
-          strength,
-          unit,
-          packSize: packSize ? parseInt(packSize) : 1,
-          manufacturer,
-          description,
-          prescriptionRequired: !!prescriptionRequired,
-          imageUrl,
-          reorderLevel: reorderLevel ? parseInt(reorderLevel) : 10,
-          sellingPrice: sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00",
-          wholesalePrice: wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null,
-          isActive: isActive !== undefined ? !!isActive : true,
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(schema.products.id, req.params.id))
         .returning();
 

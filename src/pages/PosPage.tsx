@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Search,
   Barcode,
@@ -14,8 +14,6 @@ import {
   Phone,
   Tag,
   Package,
-  Camera,
-  QrCode,
 } from "lucide-react";
 import { Product, CartItem, Category } from "../types";
 import { apiRequest } from "../lib/api";
@@ -26,11 +24,6 @@ import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 import { ReceiptModal } from "../components/ReceiptModal";
 
-// The camera scanner pulls in html5-qrcode (a large WASM/camera helper).
-// Loading it on demand keeps the POS terminal's first paint light.
-const CameraScannerModal = lazy(() =>
-  import("../components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
-);
 
 interface PosPageProps {
   onOpenShiftClick: () => void;
@@ -65,9 +58,6 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   // Completed Receipt Modal State
   const [receiptData, setReceiptData] = useState<any | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
-
-  // Camera QR & Barcode Scanner State
-  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   // Scanner feedback state
   const [scanNotice, setScanNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
@@ -292,7 +282,7 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   // as a barcode.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (showPaymentModal || showCameraScanner) return;
+      if (showPaymentModal) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
@@ -328,7 +318,7 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
         window.clearTimeout(scanTimerRef.current);
       }
     };
-  }, [showPaymentModal, showCameraScanner, handleScannedCode]);
+  }, [showPaymentModal, handleScannedCode]);
 
   const updateQuantity = (productId: string, newQty: number) => {
     if (newQty <= 0) {
@@ -557,16 +547,6 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
             />
           </div>
 
-          {/* Camera QR & Barcode Scanner Button */}
-          <button
-            type="button"
-            onClick={() => setShowCameraScanner(true)}
-            className="w-full sm:w-auto px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-teal-300 font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center space-x-1.5 shrink-0 border border-slate-700"
-            title="Open camera to scan QR codes and barcodes directly"
-          >
-            <Camera className="w-4 h-4 text-teal-400" />
-            <span>Camera Scanner</span>
-          </button>
 
           <button
             onClick={() => fetchProducts(searchQuery, selectedCategory)}
@@ -1017,16 +997,7 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
         />
       )}
 
-      {/* Camera QR & Barcode Scanner Modal */}
-      {showCameraScanner && (
-        <Suspense fallback={null}>
-          <CameraScannerModal
-            isOpen={showCameraScanner}
-            onClose={() => setShowCameraScanner(false)}
-            onProductScanned={(product) => addToCart(product)}
-          />
-        </Suspense>
-      )}
+
     </div>
   );
 }

@@ -103,6 +103,14 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
     fetchProducts(searchQuery, selectedCategory);
   }, [selectedCategory]);
 
+  // Live search as the cashier types a medicine name.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchProducts(searchQuery, selectedCategory);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   useEffect(() => {
     productsRef.current = products;
   }, [products]);

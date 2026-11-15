@@ -114,7 +114,7 @@ productsRouter.get("/", requireAuthentication, async (req: Request, res: Respons
       }
       GROUP BY p.id, c.name
       ${lowStock === "true" ? "HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level" : ""}
-      ORDER BY p.created_at DESC
+      ORDER BY ${search ? `CASE WHEN p.name ILIKE '${String(search).replace(/'/g, "''")}%' THEN 0 ELSE 1 END, p.name ASC` : "p.name ASC"}
     `;
 
     const result = await rawSql.unsafe(query);

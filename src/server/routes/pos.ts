@@ -118,7 +118,7 @@ posRouter.get("/search", requireAuthentication, async (req: Request, res: Respon
       )` : rawSql``}
       ${cat ? rawSql`AND p.category_id = ${cat}` : rawSql``}
       GROUP BY p.id, c.name
-      ORDER BY p.name ASC
+      ORDER BY ${qStr ? rawSql`CASE WHEN p.name ILIKE ${String(query).trim() + "%"} THEN 0 ELSE 1 END, p.name ASC` : rawSql`p.name ASC`}
       LIMIT 30
     `;
 

@@ -84,6 +84,14 @@ export function ProductsPage({
     };
   }, [selectedCategory, lowStockOnly, refreshKey]);
 
+  // Live search: show products whose names start with the typed letter first.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchProducts();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const handleImportSuccess = () => {
     // The importing session refreshes immediately (other sessions receive the
     // Supabase Realtime broadcast); either way no manual reload is needed.

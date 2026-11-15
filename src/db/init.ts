@@ -379,6 +379,10 @@ export async function runSchemaInit() {
   }
   try {
     await sql.unsafe(INIT_SCHEMA_SQL);
+    // Backfill columns added to pharmacy_settings after the table was first
+    // created (CREATE TABLE IF NOT EXISTS won't alter an existing table).
+    await sql.unsafe(`ALTER TABLE pharmacy_settings ADD COLUMN IF NOT EXISTS sms_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+    await sql.unsafe(`ALTER TABLE pharmacy_settings ADD COLUMN IF NOT EXISTS sms_recipient_phone TEXT;`).catch(() => {});
     // Ensure any legacy default name is updated to Empress Oris Herbal & Mart
     await sql.unsafe(`
       UPDATE pharmacy_settings 

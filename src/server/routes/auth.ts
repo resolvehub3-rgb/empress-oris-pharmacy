@@ -23,7 +23,17 @@ authRouter.get("/status", async (req: Request, res: Response) => {
     try {
       const existingUsers = await db.select().from(schema.users);
       const hasOwner = existingUsers.some((u) => u.role === "OWNER");
-      const [settings] = await db.select().from(schema.pharmacySettings).limit(1);
+
+      // Settings are optional for determining setup state; a failure here
+      // (e.g. a missing column on an older database) must not make the system
+      // pretend no owner account exists.
+      let settings: any = null;
+      try {
+        const [row] = await db.select().from(schema.pharmacySettings).limit(1);
+        settings = row || null;
+      } catch (settingsErr: any) {
+        console.warn("[Auth Status] Pharmacy settings read failed:", settingsErr?.message);
+      }
 
       return res.json({
         configured: true,

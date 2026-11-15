@@ -59,6 +59,13 @@ export function PosPage({ onOpenShiftClick, hasOpenShift }: PosPageProps) {
   const [receiptData, setReceiptData] = useState<any | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
 
+  // Auto-dismiss the receipt modal 5 seconds after a completed sale.
+  useEffect(() => {
+    if (!showReceiptModal) return;
+    const timer = setTimeout(() => setShowReceiptModal(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showReceiptModal]);
+
   // Scanner feedback state
   const [scanNotice, setScanNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [priceNotice, setPriceNotice] = useState<{ productName: string; oldPrice: string; newPrice: string } | null>(null);

@@ -43,6 +43,10 @@ export function AuthPage() {
       setError("Owner full name and email are required.");
       return;
     }
+    if (!ownerPhone.trim()) {
+      setError("Owner's SMS notification number is required.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -196,11 +200,12 @@ export function AuthPage() {
               </div>
 
               <div className="sm:col-span-1">
-                <label className="block text-xs font-bold text-slate-700 mb-1">Phone (Ghana)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Owner's SMS Notification Number *</label>
                 <div className="relative">
                   <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
                   <input
                     type="tel"
+                    required
                     placeholder="024 123 4567"
                     value={ownerPhone}
                     onChange={(e) => setOwnerPhone(e.target.value)}

@@ -3,6 +3,7 @@ import { getDb, schema } from "../../db";
 import { eq } from "drizzle-orm";
 import { getSupabase } from "../../services/supabase";
 import { requireAuthentication, invalidateAuthCache } from "../middleware/auth";
+import { normalizeGhanaPhone, validateGhanaPhone } from "../../services/sasuSync";
 import { runSchemaInit } from "../../db/init";
 
 export const authRouter = Router();
@@ -90,6 +91,9 @@ authRouter.post("/setup-owner", async (req: Request, res: Response) => {
   if (!email || !fullName) {
     return res.status(400).json({ error: "Email and Full Name are required." });
   }
+  if (!phone || !validateGhanaPhone(phone)) {
+    return res.status(400).json({ error: "A valid owner SMS notification number is required." });
+  }
 
   const db = getDb();
   if (!db) {
@@ -139,6 +143,7 @@ authRouter.post("/setup-owner", async (req: Request, res: Response) => {
       })
       .returning();
 
+    const normalizedOwnerPhone = normalizeGhanaPhone(phone);
     // Check / update or insert pharmacy settings
     const existingSettings = await db.select().from(schema.pharmacySettings).limit(1);
     if (existingSettings.length === 0) {
@@ -152,12 +157,16 @@ authRouter.post("/setup-owner", async (req: Request, res: Response) => {
         country: "Ghana",
         currency: "GHS",
         currencySymbol: "GH₵",
+        smsNotificationsEnabled: true,
+        smsRecipientPhone: normalizedOwnerPhone,
       });
     } else if (pharmacyName) {
       await db.update(schema.pharmacySettings).set({
         name: pharmacyName,
         phone: pharmacyPhone || phone,
         address: pharmacyAddress,
+        smsNotificationsEnabled: true,
+        smsRecipientPhone: normalizedOwnerPhone,
       });
     }
 

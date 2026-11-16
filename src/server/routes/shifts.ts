@@ -92,6 +92,60 @@ shiftsRouter.post("/open", requireAuthentication, async (req: Request, res: Resp
 
     await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: req.user?.id, status: "OPEN" });
 
+    // Queue opening SMS (transactional outbox) - never blocks shift opening.
+    try {
+      const [settings] = await rawSql.unsafe(`SELECT name, sms_notifications_enabled, sms_recipient_phone, phone FROM pharmacy_settings LIMIT 1`);
+      const [cashier] = await rawSql.unsafe(`SELECT full_name FROM users WHERE id = '${req.user?.id}' LIMIT 1`);
+      const recipient = settings?.sms_recipient_phone || settings?.phone;
+      const cashierName = cashier?.full_name || "Cashier";
+      const openingAmount = parseFloat(openingCash) || 0;
+      const message = [
+        "EMPRESS ORIS POS - SHIFT OPENED",
+        "",
+        `Cashier: ${cashierName}`,
+        `Opening Cash: GH₵${openingAmount.toFixed(2)}`,
+        `Date: ${new Date().toLocaleDateString("en-GB")}`,
+        `Time: ${new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`,
+        "",
+        "Your cashier has started a new shift.",
+      ].join("\\n");
+
+      const refId = `shift-sms-open-${shift.id}`;
+      const [existing] = await rawSql.unsafe(`SELECT id FROM sms_outbox WHERE reference_id = '${refId}' LIMIT 1`);
+      if (!existing) {
+        const [outboxRow] = await rawSql.unsafe(`
+          INSERT INTO sms_outbox (event_type, recipient, message, status, reference_id)
+          VALUES ('SHIFT_OPENED', ${recipient ? `'${recipient}'` : "NULL"}, '${message.replace(/'/g, "''")}', 'PENDING', '${refId}')
+          RETURNING id
+        `);
+        if (outboxRow?.id) {
+          (async () => {
+            try {
+              if (!settings?.sms_notifications_enabled) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SKIPPED', last_error = 'SMS disabled by owner' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              if (!recipient) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', last_error = 'No recipient phone configured' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              const { sendSms } = await import("../../services/sasuSync");
+              const result = await sendSms(recipient, message, `shift:${shift.id}:opened`);
+              if (result.success) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW() WHERE id = '${outboxRow.id}'`);
+              } else {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+              }
+            } catch (e: any) {
+              await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(e?.message || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+            }
+          })();
+        }
+      }
+    } catch (smsErr: any) {
+      console.error("[Shift SMS] Failed to queue opening SMS:", smsErr);
+    }
+
     return res.status(201).json({ success: true, shift });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || "Failed to open shift." });
@@ -225,34 +279,38 @@ shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Res
       const totalCogs = productRows.reduce((sum: number, r: any) => sum + parseFloat(r.cogs || "0"), 0);
       const grossProfit = totalRevenue - totalCogs;
 
-      const paymentLines = payments.map((p: any) => `${p.payment_method}: GH₵${parseFloat(p.amount).toFixed(2)}`).join("\\n");
+      const momoSales = payments
+        .filter((p: any) => /MOMO|TELECEL|AIRTELTIGO/i.test(String(p.payment_method)))
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || "0"), 0);
 
-      const productLines = productRows.map((r: any) =>
-        `${r.product_name} x${r.qty_sold} | Sales GH₵${parseFloat(r.sales_value).toFixed(2)} | COGS GH₵${parseFloat(r.cogs).toFixed(2)} | Profit GH₵${(parseFloat(r.sales_value) - parseFloat(r.cogs)).toFixed(2)}`
-      ).join("\\n");
+      const cashVarianceText =
+        Math.abs(discrepancy) < 0.01
+          ? "Cash drawer balanced."
+          : discrepancy < 0
+          ? "Cash Shortage: GH" + "\u20b5" + "${Math.abs(discrepancy).toFixed(2)}"
+          : "Cash Excess: GH" + "\u20b5" + "${discrepancy.toFixed(2)}";
 
       const report = [
-        "EMPRESS ORIS PHARMACY",
-        "SHIFT CLOSING REPORT",
+        "EMPRESS ORIS POS - SHIFT CLOSED",
         "",
-        `Pharmacy: ${pharmacyName}`,
-        `Cashier: ${cashierName}`,
-        `Date: ${new Date().toLocaleDateString("en-GB")}`,
-        `Shift: ${activeShift.id}`,
+        "Cashier: " + cashierName,
+        "Date: " + new Date().toLocaleDateString("en-GB"),
         "",
-        "PRODUCTS SOLD:",
-        productLines || "No products sold",
+        "SALES:",
+        "Total Sales: GH" + "\u20b5" + totalRevenue.toFixed(2),
+        "Cash Sales: GH" + "\u20b5" + cashSales.toFixed(2),
+        "MoMo Sales: GH" + "\u20b5" + momoSales.toFixed(2),
         "",
         "FINANCIAL SUMMARY:",
-        `Total Sales Revenue: GH₵${totalRevenue.toFixed(2)}`,
-        `Total Discounts: GH₵${totalDiscount.toFixed(2)}`,
-        `Cost of Goods Sold: GH₵${totalCogs.toFixed(2)}`,
-        `Gross Profit: GH₵${grossProfit.toFixed(2)}`,
-        `Total Transactions: ${totals?.txn_count || 0}`,
-        paymentLines,
+        "COGS: GH" + "\u20b5" + totalCogs.toFixed(2),
+        "Gross Profit: GH" + "\u20b5" + grossProfit.toFixed(2),
         "",
-        "SHIFT STATUS: CLOSED",
-      ].join("\\n");
+        "CASH RECONCILIATION:",
+        "Opening Cash: GH" + "\u20b5" + openingCash.toFixed(2),
+        "Expected Cash: GH" + "\u20b5" + expectedCash.toFixed(2),
+        "Actual Cash: GH" + "\u20b5" + actualCashNum.toFixed(2),
+        cashVarianceText,
+      ].join("\n");
 
       // Insert into outbox (idempotent via reference_id)
       const refId = `shift-sms-${activeShift.id}`;
@@ -277,7 +335,7 @@ shiftsRouter.post("/close", requireAuthentication, async (req: Request, res: Res
                 return;
               }
               const { sendSms } = await import("../../services/sasuSync");
-              const result = await sendSms(recipient, report);
+              const result = await sendSms(recipient, report, `shift:${activeShift.id}:closed`);
               if (result.success) {
                 await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW() WHERE id = '${outboxRow.id}'`);
               } else {

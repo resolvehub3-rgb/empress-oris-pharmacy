@@ -367,7 +367,7 @@ export function AddProductModal({
                     title="Scan barcode with camera"
                   >
                     <Camera className="w-4 h-4 text-teal-400" />
-                    <span>Scan Barcode</span>
+                    <span>Scan</span>
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">

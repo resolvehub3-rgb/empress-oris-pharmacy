@@ -12,6 +12,7 @@ import {
   Wallet,
   Users,
   BarChart3,
+  TrendingUp,
   Bell,
   ScrollText,
   Settings,
@@ -34,6 +35,7 @@ export type NavTab =
   | "expenses"
   | "employees"
   | "reports"
+  | "salesTrend"
   | "notifications"
   | "audit"
   | "settings";
@@ -103,6 +105,7 @@ export function Sidebar({
       title: "Intelligence & Control",
       items: [
         { id: "reports", label: "Reports & COGS", icon: BarChart3 },
+        { id: "salesTrend", label: "Sales Trend", icon: TrendingUp },
         {
           id: "notifications",
           label: "Stock Alerts",

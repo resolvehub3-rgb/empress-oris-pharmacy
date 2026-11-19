@@ -18,6 +18,7 @@ import { reportsRouter } from "./routes/reports";
 import { settingsRouter } from "./routes/settings";
 import { notificationsRouter } from "./routes/notifications";
 import { auditRouter } from "./routes/audit";
+import { salesTrendRouter } from "./routes/salesTrend";
 import { getDb } from "../db";
 
 export function createExpressApp() {
@@ -61,6 +62,7 @@ export function createExpressApp() {
   app.use("/api/settings", settingsRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/audit", auditRouter);
+app.use("/api/sales-trend", salesTrendRouter);
 
   // Global error handler for multer and other errors
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

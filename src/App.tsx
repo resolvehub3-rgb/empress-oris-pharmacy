@@ -38,6 +38,9 @@ const EmployeesPage = lazy(() =>
 const ReportsPage = lazy(() =>
   import("./pages/ReportsPage").then((m) => ({ default: m.ReportsPage }))
 );
+const SalesTrendPage = lazy(() =>
+  import("./pages/SalesTrendPage").then((m) => ({ default: m.SalesTrendPage }))
+);
 const NotificationsPage = lazy(() =>
   import("./pages/NotificationsPage").then((m) => ({ default: m.NotificationsPage }))
 );
@@ -80,7 +83,10 @@ function MainApp() {
     if (user?.role === "EMPLOYEE") {
       setCurrentTab("pos");
     }
-  }, [user]);
+    if (user?.role !== "OWNER" && currentTab === "salesTrend") {
+      setCurrentTab(user?.role === "EMPLOYEE" ? "pos" : "dashboard");
+    }
+  }, [user, currentTab]);
 
   // Global state
   const [categories, setCategories] = useState<Category[]>([]);
@@ -270,6 +276,7 @@ function MainApp() {
             {currentTab === "employees" && <EmployeesPage />}
 
             {currentTab === "reports" && <ReportsPage />}
+            {currentTab === "salesTrend" && <SalesTrendPage />}
 
             {currentTab === "notifications" && <NotificationsPage />}
 

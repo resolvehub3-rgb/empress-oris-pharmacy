@@ -45,13 +45,17 @@ stockRouter.post(
         let newQty = 0;
 
         if (existingBatchId) {
-          // Increase quantity of existing batch
+          // Increase (or, via a negative quantity, decrease) quantity of existing batch
           const [existingBatch] = await tx`SELECT * FROM batches WHERE id = ${existingBatchId} FOR UPDATE`;
           if (!existingBatch) {
             throw new Error("Specified batch not found.");
           }
           prevQty = existingBatch.current_quantity;
           newQty = prevQty + parseInt(quantity);
+
+          if (newQty < 0) {
+            throw new Error(`Insufficient batch stock. Current quantity is ${prevQty}, cannot reduce by ${Math.abs(parseInt(quantity))}.`);
+          }
 
           const [updatedBatch] = await tx`
             UPDATE batches 
@@ -64,6 +68,14 @@ stockRouter.post(
             RETURNING *
           `;
           targetBatch = updatedBatch;
+
+          // Keep the product-level price in sync even if a price is already listed.
+          if (sellingPrice) {
+            await tx`
+              UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+              WHERE id = ${productId}
+            `;
+          }
         } else {
           // Create New Batch
           if (!batchNumber) {
@@ -83,13 +95,28 @@ stockRouter.post(
             // Update existing batch instead of duplicating
             prevQty = duplicateBatch.current_quantity;
             newQty = prevQty + parseInt(quantity);
+
+            if (newQty < 0) {
+              throw new Error(`Insufficient batch stock. Current quantity is ${prevQty}, cannot reduce by ${Math.abs(parseInt(quantity))}.`);
+            }
+
             const [updatedBatch] = await tx`
               UPDATE batches 
-              SET current_quantity = ${newQty}, updated_at = NOW()
+              SET current_quantity = ${newQty},
+                  cost_price = ${costPrice ? parseFloat(costPrice) : duplicateBatch.cost_price},
+                  selling_price = ${sellingPrice ? parseFloat(sellingPrice) : duplicateBatch.selling_price},
+                  updated_at = NOW()
               WHERE id = ${duplicateBatch.id}
               RETURNING *
             `;
             targetBatch = updatedBatch;
+
+             if (sellingPrice) {
+               await tx`
+                 UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+                 WHERE id = ${productId}
+               `;
+             }
           } else {
             prevQty = 0;
             newQty = parseInt(quantity);
@@ -106,6 +133,13 @@ stockRouter.post(
               RETURNING *
             `;
             targetBatch = newBatch;
+
+             if (sellingPrice) {
+               await tx`
+                 UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+                 WHERE id = ${productId}
+               `;
+             }
           }
         }
 

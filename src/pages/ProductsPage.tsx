@@ -357,12 +357,36 @@ export function ProductsPage({
                           </button>
 
                           {(user?.role === "OWNER" || user?.role === "ADMIN") && (
-                            <button
-                              onClick={() => onAddStockClick(p)}
-                              className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold rounded-lg text-xs"
-                            >
-                              + Add Stock
-                            </button>
+                            <>
+                              <button
+                                onClick={async () => {
+                                  const newPrice = window.prompt(
+                                    `Update selling price for ${p.name} (current: GH₵ ${parseFloat(p.selling_price || "0").toFixed(2)})`,
+                                    String(p.selling_price || "0")
+                                  );
+                                  if (newPrice === null) return;
+                                  try {
+                                    await apiRequest(`/api/products/${p.id}`, {
+                                      method: "PUT",
+                                      body: JSON.stringify({ sellingPrice: newPrice }),
+                                    });
+                                    // Also update batches' selling price via stock adjust? product-level enough.
+                                    setRefreshKey((k) => k + 1);
+                                  } catch (err: any) {
+                                    alert("Failed to update price: " + err.message);
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg text-xs"
+                              >
+                                Edit Price
+                              </button>
+                              <button
+                                onClick={() => onAddStockClick(p)}
+                                className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold rounded-lg text-xs"
+                              >
+                                + Add Stock
+                              </button>
+                            </>
                           )}
                         </td>
                       </tr>
@@ -400,6 +424,7 @@ export function ProductsPage({
                                       <th className="py-1">Selling Price</th>
                                       <th className="py-1">Expiry Date</th>
                                       <th className="py-1 text-center">Status</th>
+                                      <th className="py-1 text-center">Actions</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
@@ -426,6 +451,36 @@ export function ProductsPage({
                                           >
                                             {b.is_expired ? "EXPIRED" : "ACTIVE"}
                                           </span>
+                                        </td>
+                                        <td className="py-1.5 text-center">
+                                          {(user?.role === "OWNER" || user?.role === "ADMIN") && (
+                                            <button
+                                              onClick={async () => {
+                                                const change = window.prompt(
+                                                  `Adjust stock for batch ${b.batch_number} (current: ${b.current_quantity}). Enter positive to increase, negative to reduce:`,
+                                                  "0"
+                                                );
+                                                if (change === null) return;
+                                                const reason = window.prompt("Reason for adjustment:", "Manual stock adjustment") || "Manual stock adjustment";
+                                                try {
+                                                  await apiRequest("/api/stock/adjust", {
+                                                    method: "POST",
+                                                    body: JSON.stringify({
+                                                      batchId: b.id,
+                                                      quantityChange: parseInt(change),
+                                                      reason,
+                                                    }),
+                                                  });
+                                                  setRefreshKey((k) => k + 1);
+                                                } catch (err: any) {
+                                                  alert("Failed to adjust stock: " + err.message);
+                                                }
+                                              }}
+                                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg text-[10px]"
+                                            >
+                                              Adjust
+                                            </button>
+                                          )}
                                         </td>
                                       </tr>
                                     ))}

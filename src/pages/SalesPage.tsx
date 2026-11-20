@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Receipt, Search, Printer, RotateCcw, AlertCircle, CheckCircle2, Calendar } from "lucide-react";
+import { Receipt, Search, Printer, RotateCcw, AlertCircle, CheckCircle2, Calendar, Trash2 } from "lucide-react";
 import { Sale } from "../types";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -21,6 +21,7 @@ export function SalesPage() {
   const [refundSale, setRefundSale] = useState<any | null>(null);
   const [refundReason, setRefundReason] = useState("");
   const [refundLoading, setRefundLoading] = useState(false);
+  const [clearingSales, setClearingSales] = useState(false);
 
   const fetchSales = async () => {
     setLoading(true);
@@ -123,6 +124,20 @@ export function SalesPage() {
     }
   };
 
+  const handleClearSales = async () => {
+    if (!window.confirm("Clear ALL sales records? This cannot be undone.")) return;
+    setClearingSales(true);
+    try {
+      await apiRequest("/api/sales/clear", { method: "POST" });
+      alert("All sales records cleared.");
+      fetchSales();
+    } catch (err: any) {
+      alert("Failed to clear sales: " + err.message);
+    } finally {
+      setClearingSales(false);
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -135,6 +150,16 @@ export function SalesPage() {
             Complete transaction history with thermal receipt reprints and authorized returns.
           </p>
         </div>
+        {user?.role === "OWNER" && (
+          <button
+            onClick={handleClearSales}
+            disabled={clearingSales}
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center space-x-2 disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>{clearingSales ? "Clearing..." : "Clear Sales"}</span>
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}

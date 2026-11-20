@@ -215,3 +215,44 @@ salesRouter.post(
     }
   }
 );
+
+
+// Clear all sales records (Owner only)
+async function clearAllSales(req: Request, res: Response) {
+  const rawSql = getRawSql();
+  const db = getDb();
+  if (!rawSql || !db) return res.status(503).json({ error: "Database not connected." });
+
+  try {
+    await rawSql.begin(async (tx) => {
+      await tx`DELETE FROM sale_batches WHERE sale_item_id IN (SELECT id FROM sale_items)`;
+      await tx`DELETE FROM refund_items WHERE refund_id IN (SELECT id FROM refunds)`;
+      await tx`DELETE FROM refunds`;
+      await tx`DELETE FROM payments WHERE sale_id IN (SELECT id FROM sales)`;
+      await tx`DELETE FROM sale_items`;
+      await tx`DELETE FROM sales`;
+
+      await tx`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address)
+        VALUES (
+          ${req.user?.id || null}, 'SALES_CLEARED', 'SALE', NULL,
+          ${JSON.stringify({ clearedBy: req.user?.id || null, clearedAt: new Date().toISOString() })},
+          ${req.ip || null}
+        )
+      `;
+    });
+
+    await broadcastRealtimeEvent("SALES_CLEARED", { clearedBy: req.user?.id || null });
+
+    return res.json({ success: true, message: "All sales records cleared successfully." });
+  } catch (err: any) {
+    console.error("[Clear Sales] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to clear sales." });
+  }
+}
+
+salesRouter.delete("/", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.delete("/clear", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.post("/clear", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.delete("/all", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.post("/clear-all", requireAuthentication, requireRole(["OWNER"]), clearAllSales);

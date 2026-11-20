@@ -1,12 +1,231 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/services/sasuSync.ts
+var sasuSync_exports = {};
+__export(sasuSync_exports, {
+  getSasuSyncEndpoint: () => getSasuSyncEndpoint,
+  isSasuSyncConfigured: () => isSasuSyncConfigured,
+  normalizeGhanaPhone: () => normalizeGhanaPhone,
+  sendSms: () => sendSms,
+  validateGhanaPhone: () => validateGhanaPhone
+});
+function getBaseUrl() {
+  return (process.env.SASUSYNC_BASE_URL || "https://sms.sasusync.com").replace(/\/+$/, "");
+}
+function getMode() {
+  return process.env.SASUSYNC_MODE === "live" ? "live" : "sandbox";
+}
+function getSasuSyncEndpoint() {
+  const base = getBaseUrl();
+  return getMode() === "live" ? `${base}/api/v1/send` : `${base}/smssandbox/v1/send`;
+}
+function isSasuSyncConfigured() {
+  return !!process.env.SASUSYNC_API_KEY && !!process.env.SASUSYNC_SENDER_ID;
+}
+function normalizeGhanaPhone(input) {
+  const raw = String(input || "").trim().replace(/\s+/g, "").replace(/^\+/, "");
+  if (!raw) return "";
+  if (raw.startsWith("233") && raw.length >= 12) return raw;
+  if (raw.startsWith("0") && raw.length === 10) return `233${raw.slice(1)}`;
+  if (raw.length === 9) return `233${raw}`;
+  return raw;
+}
+function validateGhanaPhone(input) {
+  const normalized = normalizeGhanaPhone(input);
+  return /^233\d{9}$/.test(normalized);
+}
+async function sendSms(to, message, idempotencyKey) {
+  const apiKey = process.env.SASUSYNC_API_KEY;
+  const senderId = process.env.SASUSYNC_SENDER_ID || process.env.SASUSYNC_SENDER;
+  if (!apiKey || !senderId) {
+    return {
+      success: false,
+      error: "SasuSync is not configured (missing SASUSYNC_API_KEY or SASUSYNC_SENDER_ID)."
+    };
+  }
+  const recipient = normalizeGhanaPhone(to);
+  if (!validateGhanaPhone(recipient)) {
+    return { success: false, error: "Invalid recipient phone number." };
+  }
+  const url = getSasuSyncEndpoint();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15e3);
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey
+    };
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sender: senderId,
+        recipients: [recipient],
+        message
+      }),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data?.message || data?.error || `HTTP ${response.status}`
+      };
+    }
+    const taskId = data?.task_id || data?.taskId || data?.id;
+    const queued = data?.status === "queued" || data?.queued === true;
+    return {
+      success: true,
+      taskId,
+      providerMessageId: taskId,
+      queued
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err?.name === "AbortError" ? "SMS request timed out." : err?.message || "Network error contacting SasuSync."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+var init_sasuSync = __esm({
+  "src/services/sasuSync.ts"() {
+  }
+});
+
 // src/server/app.ts
 import express from "express";
 import cors from "cors";
+import multer4 from "multer";
+
+// src/server/compress.ts
+import zlib from "node:zlib";
+var COMPRESSIBLE = /^(text\/|application\/(?:json|javascript|xml|manifest\+json|rss\+xml|atom\+xml|x-javascript)|image\/svg\+xml)/i;
+function hasPayload(chunk2) {
+  if (chunk2 === void 0 || chunk2 === null) return false;
+  if (typeof chunk2 === "string") return chunk2.length > 0;
+  if (Buffer.isBuffer(chunk2)) return chunk2.length > 0;
+  if (chunk2 instanceof Uint8Array) return chunk2.length > 0;
+  return true;
+}
+function gzipCompression() {
+  return function compressionMiddleware(req, res, next) {
+    const acceptEncoding = String(req.headers["accept-encoding"] || "");
+    if (!/\bgzip\b/i.test(acceptEncoding)) {
+      return next();
+    }
+    const originalWrite = res.write.bind(res);
+    const originalEnd = res.end.bind(res);
+    let stream = null;
+    let decided = false;
+    let wroteBody = false;
+    let ended = false;
+    let originalContentLength;
+    const decide = () => {
+      if (decided) return;
+      decided = true;
+      if (res.headersSent) return;
+      const type = String(res.getHeader("Content-Type") || "");
+      const alreadyEncoded = res.getHeader("Content-Encoding");
+      if (alreadyEncoded || !COMPRESSIBLE.test(type)) return;
+      const contentLength = res.getHeader("Content-Length");
+      originalContentLength = typeof contentLength === "string" || typeof contentLength === "number" ? contentLength : void 0;
+      res.setHeader("Content-Encoding", "gzip");
+      const vary = res.getHeader("Vary");
+      res.setHeader("Vary", vary ? `${vary}, Accept-Encoding` : "Accept-Encoding");
+      res.removeHeader("Content-Length");
+      const gz = zlib.createGzip({ level: zlib.constants.Z_DEFAULT_COMPRESSION });
+      gz.on("data", (chunk2) => {
+        originalWrite(chunk2);
+      });
+      gz.on("error", (err) => {
+        console.error("[Compression] gzip stream error:", err?.message || err);
+        try {
+          originalEnd();
+        } catch {
+        }
+      });
+      stream = gz;
+    };
+    const bypassCompression = () => {
+      if (stream) {
+        stream.destroy();
+        stream = null;
+      }
+      if (!res.headersSent) {
+        res.removeHeader("Content-Encoding");
+        if (originalContentLength !== void 0) {
+          res.setHeader("Content-Length", originalContentLength);
+        }
+      }
+    };
+    res.write = function(chunk2, encoding, cb) {
+      if (ended) return false;
+      decide();
+      if (!stream) return originalWrite(chunk2, encoding, cb);
+      if (hasPayload(chunk2)) {
+        wroteBody = true;
+        stream.write(chunk2, encoding, cb);
+      } else if (typeof cb === "function") {
+        cb();
+      }
+      return true;
+    };
+    res.end = function(chunk2, encoding, cb) {
+      if (typeof chunk2 === "function") {
+        cb = chunk2;
+        chunk2 = void 0;
+        encoding = void 0;
+      } else if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = void 0;
+      }
+      if (ended) {
+        if (typeof cb === "function") cb();
+        return res;
+      }
+      ended = true;
+      decide();
+      const finish = () => {
+        originalEnd();
+        if (typeof cb === "function") cb();
+      };
+      const payload = hasPayload(chunk2);
+      if (!stream || !wroteBody && !payload) {
+        if (!wroteBody) bypassCompression();
+        if (payload) originalWrite(chunk2, encoding);
+        finish();
+        return res;
+      }
+      stream.once("end", finish);
+      if (payload) {
+        const buf = Buffer.isBuffer(chunk2) ? chunk2 : Buffer.from(
+          String(chunk2),
+          typeof encoding === "string" ? encoding : "utf8"
+        );
+        if (buf.length > 0) {
+          wroteBody = true;
+          stream.write(buf);
+        }
+      }
+      stream.end();
+      return res;
+    };
+    next();
+  };
+}
 
 // src/server/routes/auth.ts
 import { Router } from "express";
@@ -30,6 +249,8 @@ __export(schema_exports, {
   payments: () => payments,
   pharmacySettings: () => pharmacySettings,
   productImages: () => productImages,
+  productImports: () => productImports,
+  productImportsRelations: () => productImportsRelations,
   products: () => products,
   productsRelations: () => productsRelations,
   purchaseItems: () => purchaseItems,
@@ -41,6 +262,7 @@ __export(schema_exports, {
   saleItemsRelations: () => saleItemsRelations,
   sales: () => sales,
   salesRelations: () => salesRelations,
+  smsOutbox: () => smsOutbox,
   stockMovements: () => stockMovements,
   suppliers: () => suppliers,
   users: () => users
@@ -94,6 +316,8 @@ var pharmacySettings = pgTable("pharmacy_settings", {
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).default("0.00"),
   logoUrl: text("logo_url"),
   receiptFooter: text("receipt_footer").default("Thank you for your patronage! Medicines sold are not returnable once opened."),
+  smsNotificationsEnabled: boolean("sms_notifications_enabled").default(false).notNull(),
+  smsRecipientPhone: text("sms_recipient_phone"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull()
 });
@@ -313,7 +537,7 @@ var notifications = pgTable("notifications", {
   message: text("message").notNull(),
   type: text("type").notNull(),
   // 'LOW_STOCK' | 'EXPIRING_SOON' | 'EXPIRED' | 'SHIFT_DISCREPANCY' | 'INVENTORY_ALERT'
-  referenceId: text("reference_id"),
+  referenceId: text("reference_id").unique(),
   isRead: boolean("is_read").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull()
 });
@@ -328,6 +552,45 @@ var auditLogs = pgTable("audit_logs", {
   ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").defaultNow().notNull()
 });
+var productImports = pgTable("product_imports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  fileName: text("file_name").notNull(),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  mode: text("mode").notNull().default("ADD_NEW"),
+  // 'ADD_NEW' (update modes are not enabled)
+  totalRows: integer("total_rows").notNull().default(0),
+  importedRows: integer("imported_rows").notNull().default(0),
+  duplicateRows: integer("duplicate_rows").notNull().default(0),
+  failedRows: integer("failed_rows").notNull().default(0),
+  stockRows: integer("stock_rows").notNull().default(0),
+  batchesCreated: integer("batches_created").notNull().default(0),
+  movementsCreated: integer("movements_created").notNull().default(0),
+  categoriesCreated: integer("categories_created").notNull().default(0),
+  status: text("status").notNull().default("COMPLETED"),
+  // 'COMPLETED' | 'FAILED'
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at")
+});
+var smsOutbox = pgTable("sms_outbox", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventType: text("event_type").notNull(),
+  recipient: text("recipient").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("PENDING"),
+  // PENDING | SENT | FAILED
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  referenceId: text("reference_id").unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at")
+});
+var productImportsRelations = relations(productImports, ({ one }) => ({
+  uploadedByUser: one(users, {
+    fields: [productImports.uploadedBy],
+    references: [users.id]
+  })
+}));
 var productsRelations = relations(products, ({ one, many }) => ({
   category: one(categories, {
     fields: [products.categoryId],
@@ -447,14 +710,15 @@ async function broadcastRealtimeEvent(eventType, payload) {
   if (!supabase) return;
   try {
     const channel = supabase.channel("pharmacy-realtime");
-    await channel.send({
-      type: "broadcast",
-      event: eventType,
-      payload: {
-        ...payload,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    });
+    const message = {
+      ...payload,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    try {
+      await channel.httpSend(eventType, message);
+    } catch (httpErr) {
+      await channel.send({ type: "broadcast", event: eventType, payload: message });
+    }
   } catch (err) {
     console.error("[Supabase Realtime] Broadcast warning:", err);
   }
@@ -462,12 +726,36 @@ async function broadcastRealtimeEvent(eventType, payload) {
 
 // src/server/middleware/auth.ts
 import { eq } from "drizzle-orm";
+var AUTH_CACHE_TTL_MS = 6e4;
+var AUTH_CACHE_MAX_ENTRIES = 500;
+var authCache = /* @__PURE__ */ new Map();
+function invalidateAuthCache(token) {
+  if (token) authCache.delete(token);
+  else authCache.clear();
+}
+function rememberVerifiedToken(token, user) {
+  const now = Date.now();
+  authCache.set(token, { user, expires: now + AUTH_CACHE_TTL_MS });
+  for (const [key, entry] of authCache) {
+    if (entry.expires <= now) authCache.delete(key);
+  }
+  while (authCache.size > AUTH_CACHE_MAX_ENTRIES) {
+    const oldest = authCache.keys().next().value;
+    if (oldest === void 0) break;
+    authCache.delete(oldest);
+  }
+}
 async function requireAuthentication(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentication required. Missing Bearer token." });
   }
   const token = authHeader.split(" ")[1];
+  const cached = authCache.get(token);
+  if (cached && cached.expires > Date.now()) {
+    req.user = cached.user;
+    return next();
+  }
   try {
     const supabase = getSupabase();
     if (supabase) {
@@ -484,13 +772,15 @@ async function requireAuthentication(req, res, next) {
               role: found.role,
               status: found.status
             };
+            rememberVerifiedToken(token, req.user);
             return next();
           }
         }
       }
     }
     const db = getDb();
-    if (db && token) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (db && token && UUID_RE.test(token)) {
       const [user] = await db.select().from(schema_exports.users).where(eq(schema_exports.users.id, token)).limit(1);
       if (user && user.status === "ACTIVE") {
         req.user = {
@@ -500,6 +790,7 @@ async function requireAuthentication(req, res, next) {
           role: user.role,
           status: user.status
         };
+        rememberVerifiedToken(token, req.user);
         return next();
       }
     }
@@ -522,6 +813,9 @@ function requireRole(allowedRoles) {
     next();
   };
 }
+
+// src/server/routes/auth.ts
+init_sasuSync();
 
 // src/db/init.ts
 var INIT_SCHEMA_SQL = `
@@ -567,6 +861,8 @@ CREATE TABLE IF NOT EXISTS pharmacy_settings (
   tax_rate NUMERIC(5, 2) DEFAULT 0.00,
   logo_url TEXT,
   receipt_footer TEXT DEFAULT 'Thank you for your patronage! Medicines sold are not returnable once opened.',
+  sms_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  sms_recipient_phone TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -812,7 +1108,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   type TEXT NOT NULL,
-  reference_id TEXT,
+  reference_id TEXT UNIQUE,
   is_read BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -829,6 +1125,26 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 23. Product Excel Imports (Import History)
+CREATE TABLE IF NOT EXISTS product_imports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_name TEXT NOT NULL,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  mode TEXT NOT NULL DEFAULT 'ADD_NEW',
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  imported_rows INTEGER NOT NULL DEFAULT 0,
+  duplicate_rows INTEGER NOT NULL DEFAULT 0,
+  failed_rows INTEGER NOT NULL DEFAULT 0,
+  stock_rows INTEGER NOT NULL DEFAULT 0,
+  batches_created INTEGER NOT NULL DEFAULT 0,
+  movements_created INTEGER NOT NULL DEFAULT 0,
+  categories_created INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'COMPLETED',
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
@@ -839,6 +1155,38 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(produc
 CREATE INDEX IF NOT EXISTS idx_sales_receipt ON sales(receipt_number);
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_product_imports_created_at ON product_imports(created_at DESC);
+
+-- SMS notification outbox
+CREATE TABLE IF NOT EXISTS sms_outbox (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  reference_id TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_sms_outbox_status ON sms_outbox(status);
+
+-- Migration: add unique constraint on reference_id if missing
+-- Guard on pg_constraint first: re-running ALTER TABLE ... UNIQUE on an
+-- already-constrained column makes Postgres try to re-create the backing
+-- index and fail with 42P07 (relation already exists), which aborted the
+-- whole schema init on every server start.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'notifications'::regclass
+      AND conname = 'notifications_reference_id_unique'
+  ) THEN
+    ALTER TABLE notifications ADD CONSTRAINT notifications_reference_id_unique UNIQUE (reference_id);
+  END IF;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
 `;
 async function runSchemaInit() {
   const sql2 = getRawSql();
@@ -848,13 +1196,17 @@ async function runSchemaInit() {
   }
   try {
     await sql2.unsafe(INIT_SCHEMA_SQL);
+    await sql2.unsafe(`ALTER TABLE pharmacy_settings ADD COLUMN IF NOT EXISTS sms_notifications_enabled BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {
+    });
+    await sql2.unsafe(`ALTER TABLE pharmacy_settings ADD COLUMN IF NOT EXISTS sms_recipient_phone TEXT;`).catch(() => {
+    });
     await sql2.unsafe(`
       UPDATE pharmacy_settings 
       SET name = 'Empress Oris Herbal & Mart' 
       WHERE name = 'HealthFirst Pharmacy' OR name = 'RxDispense Ghana' OR name ILIKE '%HealthFirst%';
     `).catch(() => {
     });
-    console.log("[DB Init] Successfully verified and initialized all 22 database tables!");
+    console.log("[DB Init] Successfully verified and initialized all 23 database tables!");
     return true;
   } catch (err) {
     console.error("[DB Init] Error running schema initialization:", err);
@@ -877,7 +1229,13 @@ authRouter.get("/status", async (req, res) => {
     try {
       const existingUsers = await db.select().from(schema_exports.users);
       const hasOwner = existingUsers.some((u) => u.role === "OWNER");
-      const [settings] = await db.select().from(schema_exports.pharmacySettings).limit(1);
+      let settings = null;
+      try {
+        const [row] = await db.select().from(schema_exports.pharmacySettings).limit(1);
+        settings = row || null;
+      } catch (settingsErr) {
+        console.warn("[Auth Status] Pharmacy settings read failed:", settingsErr?.message);
+      }
       return res.json({
         configured: true,
         hasOwner,
@@ -925,6 +1283,9 @@ authRouter.post("/setup-owner", async (req, res) => {
   if (!email || !fullName) {
     return res.status(400).json({ error: "Email and Full Name are required." });
   }
+  if (!phone || !validateGhanaPhone(phone)) {
+    return res.status(400).json({ error: "A valid owner SMS notification number is required." });
+  }
   const db = getDb();
   if (!db) {
     return res.status(503).json({ error: "Database not connected. Please check configuration." });
@@ -962,6 +1323,7 @@ authRouter.post("/setup-owner", async (req, res) => {
       role: "OWNER",
       status: "ACTIVE"
     }).returning();
+    const normalizedOwnerPhone = normalizeGhanaPhone(phone);
     const existingSettings = await db.select().from(schema_exports.pharmacySettings).limit(1);
     if (existingSettings.length === 0) {
       await db.insert(schema_exports.pharmacySettings).values({
@@ -973,13 +1335,17 @@ authRouter.post("/setup-owner", async (req, res) => {
         region: "Greater Accra",
         country: "Ghana",
         currency: "GHS",
-        currencySymbol: "GH\u20B5"
+        currencySymbol: "GH\u20B5",
+        smsNotificationsEnabled: true,
+        smsRecipientPhone: normalizedOwnerPhone
       });
     } else if (pharmacyName) {
       await db.update(schema_exports.pharmacySettings).set({
         name: pharmacyName,
         phone: pharmacyPhone || phone,
-        address: pharmacyAddress
+        address: pharmacyAddress,
+        smsNotificationsEnabled: true,
+        smsRecipientPhone: normalizedOwnerPhone
       });
     }
     await db.insert(schema_exports.auditLogs).values({
@@ -1071,6 +1437,8 @@ authRouter.get("/me", requireAuthentication, async (req, res) => {
   }
 });
 authRouter.post("/logout", requireAuthentication, async (req, res) => {
+  const authHeader = req.headers.authorization;
+  invalidateAuthCache(authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null);
   const db = getDb();
   if (db && req.user) {
     await db.insert(schema_exports.auditLogs).values({
@@ -1084,13 +1452,1616 @@ authRouter.post("/logout", requireAuthentication, async (req, res) => {
   return res.json({ success: true, message: "Logged out successfully." });
 });
 
-// src/server/routes/products.ts
+// src/server/routes/import.ts
 import { Router as Router2 } from "express";
 import multer from "multer";
-import { eq as eq3 } from "drizzle-orm";
-var productsRouter = Router2();
-var upload = multer({
+import { z as z2 } from "zod";
+
+// src/server/import/excel.ts
+import * as XLSX from "xlsx";
+
+// src/server/import/columns.ts
+var COLUMNS = [
+  {
+    key: "name",
+    label: "Product Name",
+    required: true,
+    kind: "text",
+    hint: "Required. Name of the product as it appears in the POS (e.g. Paracetamol 500mg).",
+    aliases: ["name", "item", "itemname", "item name", "product", "productname", "product name", "drugname", "drug name", "producttitle", "medicine", "medicinename"]
+  },
+  {
+    key: "genericName",
+    label: "Generic Name",
+    required: false,
+    kind: "text",
+    hint: "Chemical/generic name (e.g. Paracetamol, Amoxicillin).",
+    aliases: ["generic", "genericname", "chemicalname", "genericdrugname", "inn"]
+  },
+  {
+    key: "brandName",
+    label: "Brand",
+    required: false,
+    kind: "text",
+    hint: "Brand or trade name (e.g. Panadol, Emzor).",
+    aliases: ["brand", "brandname", "tradename", "brandtradename"]
+  },
+  {
+    key: "sku",
+    label: "SKU",
+    required: false,
+    kind: "text",
+    hint: "Stock keeping unit. Leave blank and a unique SKU is generated automatically. Must be unique.",
+    aliases: ["sku", "skucode", "sku code", "itemcode", "item code", "productcode", "product code", "stockcode", "stock code", "reference"]
+  },
+  {
+    key: "barcode",
+    label: "Barcode",
+    required: false,
+    kind: "text",
+    hint: "UPC/EAN barcode. Must be unique when supplied.",
+    aliases: ["barcode", "barcodes", "barcode number", "upc", "ean", "gtin", "upccode", "eancode"]
+  },
+  {
+    key: "category",
+    label: "Category",
+    required: false,
+    kind: "text",
+    hint: "Existing category name, or a new one - new categories are created automatically.",
+    aliases: ["category", "categoryname", "category name", "productcategory", "product category", "drugcategory", "drug category", "therapeuticcategory"]
+  },
+  {
+    key: "dosageForm",
+    label: "Dosage Form",
+    required: false,
+    kind: "text",
+    hint: "Tablet, Capsule, Syrup, Suspension, Injection, Ointment, Drops, Inhaler, etc.",
+    aliases: ["dosageform", "form", "pharmaceuticalform", "dosageformtype", "formulation"]
+  },
+  {
+    key: "strength",
+    label: "Strength",
+    required: false,
+    kind: "text",
+    hint: "e.g. 500mg, 10mg/5ml.",
+    aliases: ["strength", "potency", "strengthvolume", "dosage"]
+  },
+  {
+    key: "unit",
+    label: "Unit",
+    required: false,
+    kind: "text",
+    hint: "Unit of measure: Pack, Box, Bottle, Blister, Sachet (default Pack).",
+    aliases: ["unit", "unitofmeasure", "uom", "baseunit", "unittype"]
+  },
+  {
+    key: "packSize",
+    label: "Pack Size",
+    required: false,
+    kind: "integer",
+    hint: "Pieces per pack (whole number >= 1, default 1).",
+    aliases: ["packsize", "packsizepcs", "packquantity", "piecesperpack", "packpcs"]
+  },
+  {
+    key: "manufacturer",
+    label: "Manufacturer",
+    required: false,
+    kind: "text",
+    hint: "Manufacturer (e.g. Ernest Chemist, Tobinco, GSK).",
+    aliases: ["manufacturer", "maker", "manufacturedby", "producer", "company"]
+  },
+  {
+    key: "description",
+    label: "Description",
+    required: false,
+    kind: "text",
+    hint: "Free-text product description.",
+    aliases: ["description", "productdescription", "details", "remarks"]
+  },
+  {
+    key: "prescriptionRequired",
+    label: "Prescription Required",
+    required: false,
+    kind: "boolean",
+    hint: "Yes / No / TRUE / FALSE / 1 / 0 (default No).",
+    aliases: ["prescriptionrequired", "rxrequired", "prescription", "rx", "prescriptionneeded", "pom"]
+  },
+  {
+    key: "reorderLevel",
+    label: "Reorder Level",
+    required: false,
+    kind: "integer",
+    hint: "Low-stock alert threshold (whole number >= 0, default 10).",
+    aliases: ["reorderlevel", "reorderpoint", "minimumstock", "minstock", "lowstocklevel", "reorderqty"]
+  },
+  {
+    key: "sellingPrice",
+    label: "Selling Price (GH\u20B5)",
+    required: true,
+    kind: "price",
+    hint: "Required. Retail selling price in Ghana Cedis as a plain number (e.g. 10.50).",
+    aliases: ["sellingprice", "selling price", "sellprice", "sell price", "price", "retailprice", "retail price", "saleprice", "sale price", "sellingpriceghs", "sellingpricegh", "unitretailprice", "unit price"]
+  },
+  {
+    key: "wholesalePrice",
+    label: "Wholesale Price (GH\u20B5)",
+    required: false,
+    kind: "price",
+    hint: "Optional wholesale price in Ghana Cedis as a plain number.",
+    aliases: ["wholesaleprice", "wholesale", "bulkprice", "priceswholesale"]
+  },
+  {
+    key: "initialQuantity",
+    label: "Initial Quantity",
+    required: false,
+    kind: "integer",
+    hint: "Opening stock units (whole number >= 0). Blank or 0 = product imported without stock.",
+    aliases: ["initialquantity", "initial quantity", "quantity", "qty", "stock", "openingstock", "opening stock", "initialstock", "initial stock", "stockquantity", "stock quantity", "stockqty", "units", "unit"]
+  },
+  {
+    key: "batchNumber",
+    label: "Batch Number",
+    required: false,
+    kind: "text",
+    hint: "Required when Initial Quantity > 0 (pharmaceutical batch / lot).",
+    aliases: ["batchnumber", "batch number", "batch", "batchno", "batch no", "lotnumber", "lot number", "lotno", "lot no", "lot"]
+  },
+  {
+    key: "costPrice",
+    label: "Cost Price (GH\u20B5)",
+    required: false,
+    kind: "price",
+    hint: "Unit cost price in Ghana Cedis (used for COGS / profit reporting).",
+    aliases: ["costprice", "cost price", "unitcost", "unit cost", "cost", "purchaseprice", "purchase price", "buyprice", "buy price", "buyingprice", "buying price", "pricecost"]
+  },
+  {
+    key: "manufacturingDate",
+    label: "Manufacturing Date",
+    required: false,
+    kind: "date",
+    hint: "Date produced (DD/MM/YYYY or YYYY-MM-DD). Optional.",
+    aliases: ["manufacturingdate", "manufactureddate", "mfgdate", "productiondate", "dateofmanufacture"]
+  },
+  {
+    key: "expiryDate",
+    label: "Expiry Date",
+    required: false,
+    kind: "date",
+    hint: "Required when Initial Quantity > 0. Used for FEFO (DD/MM/YYYY or YYYY-MM-DD).",
+    aliases: ["expirydate", "expiry date", "expiry", "expirationdate", "expiration date", "expdate", "exp date", "dateofexpiry", "expireson", "expiry_date"]
+  },
+  {
+    key: "supplier",
+    label: "Supplier",
+    required: false,
+    kind: "text",
+    hint: "Existing supplier name. If not found the batch is imported without a supplier link.",
+    aliases: ["supplier", "suppliername", "vendor", "distributor", "wholesaler"]
+  },
+  {
+    key: "purchaseReference",
+    label: "Purchase Reference",
+    required: false,
+    kind: "text",
+    hint: "Invoice / PO reference recorded on the stock movement.",
+    aliases: ["purchasereference", "purchaseref", "reference", "referenceno", "invoice", "invoiceno", "invoicenumber", "ponumber", "purchaseorder"]
+  },
+  {
+    key: "stockNotes",
+    label: "Stock Notes",
+    required: false,
+    kind: "text",
+    hint: "Notes stored on the imported batch.",
+    aliases: ["stocknotes", "batchnotes", "stocknote", "inventorynotes", "notes"]
+  }
+];
+var REQUIRED_COLUMN_KEYS = COLUMNS.filter((c) => c.required).map((c) => c.key);
+var HEADER_LOOKUP = (() => {
+  const map = /* @__PURE__ */ new Map();
+  for (const col of COLUMNS) {
+    const keys = [col.label, ...col.aliases];
+    for (const key of keys) {
+      const normalized = normalizeHeader(key);
+      if (normalized && !map.has(normalized)) map.set(normalized, col.key);
+    }
+  }
+  return map;
+})();
+function normalizeHeader(raw) {
+  return String(raw ?? "").trim().replace(/\(.*?\)|\[.*?\]/g, " ").replace(/^[\s*#:]+|[\s*#:]+$/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function resolveHeader(raw) {
+  return HEADER_LOOKUP.get(normalizeHeader(raw)) ?? null;
+}
+function mapHeaderRow(cells) {
+  const columnIndexToKey = /* @__PURE__ */ new Map();
+  const unmappedLabels = [];
+  const seenFields = /* @__PURE__ */ new Set();
+  const duplicatedFields = [];
+  cells.forEach((cell, index) => {
+    const label = String(cell ?? "").trim();
+    if (!label) return;
+    const field = resolveHeader(label);
+    if (!field) {
+      unmappedLabels.push(label);
+      return;
+    }
+    if (seenFields.has(field)) {
+      if (!duplicatedFields.includes(field)) duplicatedFields.push(field);
+      return;
+    }
+    seenFields.add(field);
+    columnIndexToKey.set(index, field);
+  });
+  const missingRequired = REQUIRED_COLUMN_KEYS.filter((key) => !seenFields.has(key));
+  return {
+    columnIndexToKey,
+    unmappedLabels,
+    duplicatedFields,
+    missingRequired,
+    recognizedCount: seenFields.size
+  };
+}
+function fieldLabel(key) {
+  return COLUMNS.find((c) => c.key === key)?.label ?? key;
+}
+
+// src/server/import/excel.ts
+var MAX_FILE_BYTES = 5 * 1024 * 1024;
+var MAX_ROWS = 5e3;
+var ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
+var ALLOWED_MIME_TYPES = /* @__PURE__ */ new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/octet-stream",
+  "application/binary",
+  "application/x-ole-storage",
+  "application/x-ole-object",
+  ""
+]);
+var ImportError = class extends Error {
+  constructor(message, code = "INVALID_FILE") {
+    super(message);
+    this.code = code;
+    this.name = "ImportError";
+  }
+};
+function validateUpload(file) {
+  const originalName = String(file.originalName || "").split(/[\\/]/).pop() || "products.xlsx";
+  const lower = originalName.toLowerCase();
+  const extension = lower.slice(lower.lastIndexOf("."));
+  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+    throw new ImportError(
+      `Unsupported file type "${extension || "unknown"}". Only ${ALLOWED_EXTENSIONS.join(" and ")} files can be imported.`,
+      "INVALID_FILE"
+    );
+  }
+  if (typeof file.mimetype === "string" && !ALLOWED_MIME_TYPES.has(file.mimetype.toLowerCase())) {
+    throw new ImportError(
+      `Unsupported file content type "${file.mimetype}". Please upload a genuine Excel workbook.`,
+      "INVALID_FILE"
+    );
+  }
+  if (!file.buffer || file.buffer.length === 0) {
+    throw new ImportError("The uploaded file is empty.", "INVALID_FILE");
+  }
+  if (file.buffer.length > MAX_FILE_BYTES) {
+    throw new ImportError(
+      `File is too large (${(file.buffer.length / (1024 * 1024)).toFixed(1)} MB). Maximum size is 5 MB.`,
+      "INVALID_FILE"
+    );
+  }
+  const isZip = file.buffer.length > 4 && file.buffer[0] === 80 && file.buffer[1] === 75;
+  const isOle = file.buffer.length > 8 && file.buffer[0] === 208 && file.buffer[1] === 207 && file.buffer[2] === 17 && file.buffer[3] === 224;
+  if (extension === ".xlsx" && !isZip) {
+    throw new ImportError("The file is not a valid .xlsx workbook.", "INVALID_FILE");
+  }
+  if (extension === ".xls" && !isOle && !isZip) {
+    throw new ImportError("The file is not a valid .xls workbook.", "INVALID_FILE");
+  }
+  return originalName.slice(0, 200);
+}
+var HEADER_SCAN_ROWS = 12;
+function parseProductWorkbook(file) {
+  const fileName = validateUpload(file);
+  let workbook;
+  try {
+    workbook = XLSX.read(file.buffer, {
+      type: "buffer",
+      cellDates: true,
+      // date-formatted cells come back as real JS dates
+      cellFormula: false,
+      // never parse/evaluate formulas - cached values only
+      cellStyles: false,
+      cellNF: false,
+      cellHTML: false,
+      sheetStubs: false,
+      bookVBA: false,
+      // macros are never loaded or executed
+      bookFiles: false
+    });
+  } catch (err) {
+    throw new ImportError(
+      `The file could not be read as an Excel workbook: ${err?.message || "unknown format"}.`,
+      "INVALID_WORKBOOK"
+    );
+  }
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    throw new ImportError("The workbook does not contain any worksheets.", "INVALID_WORKBOOK");
+  }
+  const preferred = workbook.SheetNames.find((n) => {
+    const normalized = n.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return normalized === "products" || normalized === "product" || normalized === "sheet1";
+  }) ?? workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[preferred];
+  if (!worksheet || !worksheet["!ref"]) {
+    throw new ImportError(`Worksheet "${preferred}" is empty.`, "INVALID_WORKBOOK");
+  }
+  const grid = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    raw: true,
+    blankrows: true,
+    defval: null
+  });
+  if (!grid.length) {
+    throw new ImportError(
+      `Worksheet "${preferred}" has no data.
+
+Import cannot continue.
+
+Missing required columns:
+- Product Name
+- Selling Price (GH\u20B5)`,
+      "MISSING_COLUMNS"
+    );
+  }
+  const range = XLSX.utils.decode_range(worksheet["!ref"]);
+  const firstRowNumber = range.s.r + 1;
+  let headerIndex = -1;
+  let bestMapping = null;
+  const scanLimit = Math.min(grid.length, HEADER_SCAN_ROWS);
+  for (let i = 0; i < scanLimit; i++) {
+    const mapping2 = mapHeaderRow(grid[i] || []);
+    if (!bestMapping || mapping2.recognizedCount > bestMapping.recognizedCount) {
+      bestMapping = mapping2;
+      headerIndex = i;
+    }
+    if (mapping2.recognizedCount >= 3 && mapping2.missingRequired.length === 0) break;
+  }
+  if (!bestMapping || bestMapping.recognizedCount === 0) {
+    throw new ImportError(
+      "Import cannot continue.\n\nNo header row could be identified. The first row of the worksheet must contain column headers.\n\nMissing required columns:\n- Product Name\n- Selling Price (GH\u20B5)",
+      "MISSING_COLUMNS"
+    );
+  }
+  const mapping = bestMapping;
+  const headerRowNumber = firstRowNumber + headerIndex;
+  const headers = (grid[headerIndex] || []).map((cell) => String(cell ?? "").trim());
+  if (mapping.missingRequired.length > 0) {
+    const list = mapping.missingRequired.map((key) => `- ${fieldLabel(key)}`).join("\n");
+    throw new ImportError(`Import cannot continue.
+
+Missing required columns:
+${list}`, "MISSING_COLUMNS");
+  }
+  const rows = [];
+  let skippedBlankRows = 0;
+  for (let i = headerIndex + 1; i < grid.length; i++) {
+    const cells = grid[i] || [];
+    const isEmpty = cells.every((cell) => cell === null || cell === void 0 || String(cell).trim() === "");
+    if (isEmpty) {
+      skippedBlankRows++;
+      continue;
+    }
+    rows.push({ rowNumber: firstRowNumber + i, cells });
+    if (rows.length > MAX_ROWS) {
+      throw new ImportError(
+        `The worksheet contains more than ${MAX_ROWS} data rows. Split the file into smaller batches of up to ${MAX_ROWS} rows.`,
+        "TOO_MANY_ROWS"
+      );
+    }
+  }
+  if (rows.length === 0) {
+    throw new ImportError(
+      "The worksheet contains a header row but no product data rows. Add at least one product below the headers.",
+      "NO_ROWS"
+    );
+  }
+  return {
+    fileName,
+    sheetName: preferred,
+    sheetNames: workbook.SheetNames,
+    headerRowNumber,
+    headers,
+    mapping,
+    rows,
+    skippedBlankRows
+  };
+}
+function extractFields(row, columnMap) {
+  const out = {};
+  for (const [index, field] of columnMap) {
+    out[field] = row.cells[index];
+  }
+  return out;
+}
+
+// src/server/import/importService.ts
+import { randomUUID } from "crypto";
+import { desc, eq as eq3 } from "drizzle-orm";
+
+// src/server/import/validation.ts
+import { z } from "zod";
+
+// src/server/import/values.ts
+var TRUE_WORDS = /* @__PURE__ */ new Set(["true", "yes", "y", "t", "1", "required", "rx", "on"]);
+var FALSE_WORDS = /* @__PURE__ */ new Set(["false", "no", "n", "f", "0", "", "notrequired", "not required", "off"]);
+function toText(value) {
+  if (value === null || value === void 0) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const text2 = String(value).trim().replace(/\s+/g, " ");
+  return text2 === "" ? null : text2;
+}
+function extractPriceUnit(text2) {
+  const lower = String(text2 || "").toLowerCase();
+  if (/pesewa/.test(lower)) return "pesewa";
+  if (/tab(let)?s?/.test(lower)) return "tablet";
+  if (/bottle(s)?/.test(lower)) return "bottle";
+  if (/pack(s)?/.test(lower)) return "pack";
+  if (/strip(s)?/.test(lower)) return "strip";
+  if (/\/\s*1\b|\bper\s*1\b|\bper\s*one\b/.test(lower)) return "unit";
+  return null;
+}
+function parsePrice(value, label) {
+  if (value === null || value === void 0 || typeof value === "string" && value.trim() === "") {
+    return { ok: true, value: null, unit: null, original: typeof value === "string" ? value.trim() : null };
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return { ok: false, reason: `${label} must be a valid number.` };
+    if (value < 0) return { ok: false, reason: `${label} must not be negative (received ${value}).` };
+    if (value > 99999999999e-2) return { ok: false, reason: `${label} is out of range.` };
+    return { ok: true, value: Math.round(value * 100) / 100, unit: null, original: String(value) };
+  }
+  const original = String(value).trim().replace(/\s+/g, " ");
+  if (original === "") {
+    return { ok: true, value: null, unit: null, original };
+  }
+  const unit = extractPriceUnit(original);
+  const pesewaMatch = original.match(/(\d+(?:\.\d+)?)\s*pesewas?/i);
+  if (pesewaMatch) {
+    const parsed2 = Number(pesewaMatch[1]);
+    if (!Number.isFinite(parsed2) || parsed2 < 0) {
+      return { ok: false, reason: `${label} must not be negative (received "${original}").` };
+    }
+    const amount = parsed2 / 100;
+    if (amount > 99999999999e-2) return { ok: false, reason: `${label} is out of range.` };
+    return { ok: true, value: Math.round(amount * 100) / 100, unit: "pesewa", original };
+  }
+  let working = original;
+  const currencyTokens = ["gh\u20B5", "\u20B5", "ghs", "gh", "\xA2", "cedi", "cedis", "ghc"];
+  for (const token of currencyTokens.sort((a, b) => b.length - a.length)) {
+    working = working.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ");
+  }
+  working = working.replace(/\s+/g, " ").trim();
+  const numberMatch = working.match(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)/);
+  if (!numberMatch) {
+    return {
+      ok: false,
+      reason: `${label} must be a valid Ghana Cedi amount (received "${original}" - no numeric amount found).`
+    };
+  }
+  const normalized = numberMatch[1].replace(/,/g, "");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { ok: false, reason: `${label} must not be negative (received "${original}").` };
+  }
+  if (parsed > 99999999999e-2) {
+    return { ok: false, reason: `${label} is out of range.` };
+  }
+  const leftover = working.replace(numberMatch[1], " ").replace(/[\/.,\s]/g, "").replace(/[0-9]/g, "").replace(/per|tab(let)?s?|bottle(s)?|pack(s)?|strip(s)?|unit(s)?/gi, "");
+  if (leftover.trim() !== "") {
+    return {
+      ok: false,
+      reason: `${label} has an unrecognized format (received "${original}").`
+    };
+  }
+  return { ok: true, value: Math.round(parsed * 100) / 100, unit, original };
+}
+function toPrice(value, label, options) {
+  const result = parsePrice(value, label);
+  if (!result.ok) return result;
+  if (result.value === null) {
+    if (options.required) return { ok: false, reason: `${label} is required.` };
+    return { ok: true, value: null, unit: result.unit, original: result.original };
+  }
+  return { ok: true, value: result.value, unit: result.unit, original: result.original };
+}
+function toInteger(value, label, options) {
+  if (value === null || value === void 0 || typeof value === "string" && value.trim() === "") {
+    if (options.required) return { ok: false, reason: `${label} is required.` };
+    return { ok: true, value: options.fallback ?? null };
+  }
+  let parsed;
+  if (typeof value === "number") {
+    parsed = value;
+  } else {
+    const text2 = String(value).trim().replace(/,/g, "");
+    if (!/^[+-]?(\d+(?:\.\d+)?)$/.test(text2)) {
+      return { ok: false, reason: `${label} must be a whole number (received "${String(value).trim()}").` };
+    }
+    parsed = Number(text2);
+  }
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    return { ok: false, reason: `${label} must be a whole number without decimals.` };
+  }
+  if (parsed < options.min) {
+    return { ok: false, reason: `${label} must be ${options.min} or greater (received ${parsed}).` };
+  }
+  if (parsed > options.max) {
+    return { ok: false, reason: `${label} must not exceed ${options.max}.` };
+  }
+  return { ok: true, value: parsed };
+}
+function toBoolean(value, label) {
+  if (value === null || value === void 0) return { ok: true, value: false };
+  if (typeof value === "boolean") return { ok: true, value };
+  if (typeof value === "number") {
+    if (value === 1) return { ok: true, value: true };
+    if (value === 0) return { ok: true, value: false };
+    return { ok: false, reason: `${label} must be Yes or No (received ${value}).` };
+  }
+  const text2 = String(value).trim().toLowerCase().replace(/\s+/g, "");
+  if (TRUE_WORDS.has(text2)) return { ok: true, value: true };
+  if (FALSE_WORDS.has(text2)) return { ok: true, value: false };
+  return {
+    ok: false,
+    reason: `${label} must be one of: Yes, No, TRUE, FALSE, 1, 0 (received "${String(value).trim()}").`
+  };
+}
+var MONTHS = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+function dateToIso(year, month, day) {
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function serialToIso(serial) {
+  const ms = Math.round((serial - 25569) * 864e5);
+  if (!Number.isFinite(ms)) return null;
+  const date2 = new Date(ms);
+  if (Number.isNaN(date2.getTime())) return null;
+  return dateToIso(date2.getUTCFullYear(), date2.getUTCMonth() + 1, date2.getUTCDate());
+}
+function jsDateToIso(date2) {
+  if (Number.isNaN(date2.getTime())) return null;
+  return dateToIso(date2.getUTCFullYear(), date2.getUTCMonth() + 1, date2.getUTCDate());
+}
+function parseDateString(text2) {
+  const value = text2.trim();
+  if (!value) return null;
+  let match = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(value);
+  if (match) return dateToIso(Number(match[1]), Number(match[2]), Number(match[3]));
+  match = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(value);
+  if (match) {
+    let year = Number(match[3]);
+    if (year < 100) year += 2e3;
+    return dateToIso(year, Number(match[2]), Number(match[1]));
+  }
+  match = /^(\d{1,2})[\s-]([A-Za-z]{3,9})[\s-,]+(\d{4})$/.exec(value);
+  if (match) {
+    const month = MONTHS[match[2].slice(0, 3).toLowerCase()];
+    if (month) return dateToIso(Number(match[3]), month, Number(match[1]));
+  }
+  match = /^([A-Za-z]{3,9})[\s-]+(\d{1,2})[\s-,]+(\d{4})$/.exec(value);
+  if (match) {
+    const month = MONTHS[match[1].slice(0, 3).toLowerCase()];
+    if (month) return dateToIso(Number(match[3]), month, Number(match[2]));
+  }
+  const native = new Date(value);
+  if (!Number.isNaN(native.getTime()) && /\d{4}/.test(value)) {
+    return dateToIso(native.getUTCFullYear(), native.getUTCMonth() + 1, native.getUTCDate());
+  }
+  return null;
+}
+function toDate(value, label, options) {
+  if (value === null || value === void 0 || typeof value === "string" && value.trim() === "") {
+    if (options.required) return { ok: false, reason: `${label} is required.` };
+    return { ok: true, value: null };
+  }
+  if (value instanceof Date) {
+    const iso2 = jsDateToIso(value);
+    if (iso2) return { ok: true, value: iso2 };
+    return { ok: false, reason: `${label} is not a valid date.` };
+  }
+  if (typeof value === "number") {
+    if (value >= 32874 && value <= 73415) {
+      const iso2 = serialToIso(value);
+      if (iso2) return { ok: true, value: iso2 };
+    }
+    return {
+      ok: false,
+      reason: `${label} is not a valid date (received ${value} - enter a real date such as 30/05/2028 or 2028-05-30).`
+    };
+  }
+  const iso = parseDateString(String(value));
+  if (iso) return { ok: true, value: iso };
+  return {
+    ok: false,
+    reason: `${label} is not a valid date (received "${String(value).trim()}"). Use DD/MM/YYYY or YYYY-MM-DD.`
+  };
+}
+function todayIso() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+
+// src/server/import/validation.ts
+function normalizeProductName(name) {
+  return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+var coercedRowSchema = z.object({
+  name: z.string().min(1),
+  sku: z.string().min(1),
+  barcode: z.string().min(1).nullable(),
+  sellingPrice: z.number().min(0),
+  wholesalePrice: z.number().min(0).nullable(),
+  packSize: z.number().int().min(1),
+  reorderLevel: z.number().int().min(0),
+  initialQuantity: z.number().int().min(0),
+  prescriptionRequired: z.boolean(),
+  manufacturingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable()
+});
+function generateSku(productName, taken) {
+  const prefix = (productName || "PRD").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "PRD";
+  for (let i = 0; i < 500; i++) {
+    const candidate = `${prefix}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${prefix}-${Date.now().toString().slice(-8)}`;
+}
+function validateWorkbookRows(workbook, reference) {
+  const columnMap = workbook.mapping.columnIndexToKey;
+  const today = todayIso();
+  const seenSkus = /* @__PURE__ */ new Set();
+  const seenBarcodes = /* @__PURE__ */ new Set();
+  const seenNames = /* @__PURE__ */ new Set();
+  const seenSkuRows = /* @__PURE__ */ new Map();
+  const seenBarcodeRows = /* @__PURE__ */ new Map();
+  const seenNameRows = /* @__PURE__ */ new Map();
+  const takenSkus = new Set(reference.existingSkus.keys());
+  const newCategoryNames = /* @__PURE__ */ new Map();
+  const rows = [];
+  let readyCount = 0;
+  let duplicateCount = 0;
+  let invalidCount = 0;
+  let withStockCount = 0;
+  let skuGeneratedCount = 0;
+  let expiredBatchCount = 0;
+  for (const parsedRow of workbook.rows) {
+    const raw = extractFields(parsedRow, columnMap);
+    const errors = [];
+    const warnings = [];
+    const notes = [];
+    const name = toText(raw.name);
+    if (!name) errors.push("Product Name is required and must not be empty.");
+    const genericName = toText(raw.genericName);
+    const brandName = toText(raw.brandName);
+    const dosageForm = toText(raw.dosageForm);
+    const strength = toText(raw.strength);
+    const manufacturer = toText(raw.manufacturer);
+    const description = toText(raw.description);
+    const categoryName = toText(raw.category);
+    const purchaseReference = toText(raw.purchaseReference);
+    const stockNotes = toText(raw.stockNotes);
+    const unit = toText(raw.unit) || "Pack";
+    let sku = toText(raw.sku);
+    let barcode = toText(raw.barcode);
+    if (barcode) {
+      if (!/^[A-Za-z0-9\-+. ]{4,64}$/.test(barcode)) {
+        errors.push(`Barcode "${barcode}" contains unsupported characters (use digits, letters, - . + or spaces).`);
+      }
+    }
+    const sellingPriceMissing = raw.sellingPrice === null || raw.sellingPrice === void 0 || typeof raw.sellingPrice === "string" && raw.sellingPrice.trim() === "";
+    const sellingPriceResult = toPrice(raw.sellingPrice, "Selling Price", { required: false });
+    let sellingPrice = null;
+    if (sellingPriceMissing) {
+      sellingPrice = 0;
+      warnings.push("Selling Price is missing - set to GH\u20B50.00. Update before selling.");
+    } else if (!sellingPriceResult.ok) {
+      errors.push(sellingPriceResult.reason);
+      sellingPrice = null;
+    } else {
+      sellingPrice = sellingPriceResult.value ?? 0;
+      if (sellingPriceResult.unit && sellingPriceResult.original && sellingPriceResult.original !== String(sellingPrice)) {
+        notes.push(
+          `Selling price interpreted as GH\u20B5${(sellingPrice ?? 0).toFixed(2)} per ${sellingPriceResult.unit} (original value: "${sellingPriceResult.original}").`
+        );
+      } else if (sellingPriceResult.original && !/^\d+(?:\.\d+)?$/.test(sellingPriceResult.original)) {
+        notes.push(`Original selling price value preserved for audit: "${sellingPriceResult.original}".`);
+      }
+    }
+    const wholesalePriceResult = toPrice(raw.wholesalePrice, "Wholesale Price", { required: false });
+    if (!wholesalePriceResult.ok) errors.push(wholesalePriceResult.reason);
+    const wholesalePrice = wholesalePriceResult.ok ? wholesalePriceResult.value : null;
+    const costPriceResult = toPrice(raw.costPrice, "Cost Price", { required: false });
+    if (!costPriceResult.ok) errors.push(costPriceResult.reason);
+    const costPrice = costPriceResult.ok ? costPriceResult.value : null;
+    if (costPriceResult.ok && costPriceResult.unit && costPriceResult.original && costPriceResult.original !== String(costPrice)) {
+      notes.push(
+        `Cost price interpreted as GH\u20B5${(costPrice ?? 0).toFixed(2)} per ${costPriceResult.unit} (original value: "${costPriceResult.original}").`
+      );
+    } else if (costPriceResult.ok && costPriceResult.original && !/^\d+(?:\.\d+)?$/.test(costPriceResult.original)) {
+      notes.push(`Original cost price value preserved for audit: "${costPriceResult.original}".`);
+    }
+    const packSizeResult = toInteger(raw.packSize, "Pack Size", { required: false, min: 1, max: 1e5, fallback: 1 });
+    if (!packSizeResult.ok) errors.push(packSizeResult.reason);
+    const packSize = packSizeResult.ok ? packSizeResult.value ?? 1 : 1;
+    const reorderResult = toInteger(raw.reorderLevel, "Reorder Level", { required: false, min: 0, max: 1e6, fallback: 10 });
+    if (!reorderResult.ok) errors.push(reorderResult.reason);
+    const reorderLevel = reorderResult.ok ? reorderResult.value ?? 10 : 10;
+    const quantityMissing = raw.initialQuantity === null || raw.initialQuantity === void 0 || typeof raw.initialQuantity === "string" && raw.initialQuantity.trim() === "";
+    const quantityResult = toInteger(raw.initialQuantity, "Initial Quantity", { required: false, min: 0, max: 1e8, fallback: 0 });
+    if (!quantityResult.ok) errors.push(quantityResult.reason);
+    const initialQuantity = quantityResult.ok ? quantityResult.value ?? 0 : 0;
+    if (quantityMissing) {
+      warnings.push("Initial Quantity is missing - product will be imported without opening stock.");
+    }
+    const rxResult = toBoolean(raw.prescriptionRequired, "Prescription Required");
+    if (!rxResult.ok) errors.push(rxResult.reason);
+    const prescriptionRequired = rxResult.ok ? rxResult.value : false;
+    const mfgResult = toDate(raw.manufacturingDate, "Manufacturing Date", { required: false });
+    if (!mfgResult.ok) errors.push(mfgResult.reason);
+    const manufacturingDate = mfgResult.ok ? mfgResult.value : null;
+    const expiryResult = toDate(raw.expiryDate, "Expiry Date", { required: false });
+    if (!expiryResult.ok) errors.push(expiryResult.reason);
+    const expiryDate = expiryResult.ok ? expiryResult.value : null;
+    const batchNumber = toText(raw.batchNumber);
+    const hasStock = initialQuantity > 0 && !!batchNumber && !!expiryDate;
+    if (initialQuantity > 0 && (!batchNumber || !expiryDate)) {
+      warnings.push(
+        "Opening quantity recorded but stock not initialized because Batch Number/Expiry Date is missing. Product will be imported without stock; add stock later via Add Stock."
+      );
+    }
+    if (hasStock) {
+    } else if (batchNumber || expiryDate) {
+      notes.push("Batch information ignored because Initial Quantity is 0 or blank.");
+    }
+    const costPriceMissing = raw.costPrice === null || raw.costPrice === void 0 || typeof raw.costPrice === "string" && raw.costPrice.trim() === "";
+    if (costPrice === null && costPriceMissing) {
+      warnings.push("Cost Price (Buying Price) is missing - the product will be imported without cost data.");
+    }
+    const supplierName = toText(raw.supplier);
+    let supplierId = null;
+    if (supplierName) {
+      const supplier = reference.suppliers.get(supplierName.toLowerCase());
+      if (supplier) {
+        supplierId = supplier.id;
+      } else {
+        warnings.push(
+          `Supplier "${supplierName}" was not found - the batch will be imported without a supplier link.`
+        );
+      }
+    }
+    let categoryId = null;
+    let isNewCategory = false;
+    if (categoryName) {
+      const existing = reference.categories.get(categoryName.toLowerCase());
+      if (existing) {
+        categoryId = existing.id;
+      } else {
+        isNewCategory = true;
+        newCategoryNames.set(categoryName.toLowerCase(), categoryName);
+        notes.push(`New category "${categoryName}" will be created.`);
+      }
+    }
+    if (!sku) {
+      if (name) {
+        sku = generateSku(name, takenSkus);
+        takenSkus.add(sku.toLowerCase());
+        notes.push(`SKU was not supplied - generated automatically: ${sku}.`);
+        skuGeneratedCount++;
+      }
+    }
+    if (expiryDate && expiryDate < today && hasStock) {
+      warnings.push("Expiry Date is in the past - this stock cannot be sold through the POS (FEFO rules).");
+    }
+    if (costPrice !== null && sellingPrice !== null && costPrice >= sellingPrice && sellingPrice > 0) {
+      warnings.push("Cost Price is not lower than Selling Price - this product will not generate a margin.");
+    }
+    let status = errors.length > 0 ? "INVALID" : "READY";
+    const normalizedName = normalizeProductName(name);
+    if (status === "READY" && normalizedName) {
+      const dbName = reference.existingNames?.get(normalizedName);
+      if (dbName) {
+        status = "DUPLICATE";
+        errors.push(`A product with this name already exists in the system ("${dbName}").`);
+      } else if (seenNames.has(normalizedName)) {
+        status = "DUPLICATE";
+        errors.push(`Duplicate product name inside this spreadsheet (first used on row ${seenNameRows.get(normalizedName)}).`);
+      }
+    }
+    if (status === "READY" && sku) {
+      const skuKey = sku.toLowerCase();
+      const dbMatch = reference.existingSkus.get(skuKey);
+      if (dbMatch) {
+        status = "DUPLICATE";
+        errors.push(`SKU already exists in the system ("${dbMatch}").`);
+      } else if (seenSkus.has(skuKey)) {
+        status = "DUPLICATE";
+        errors.push(`Duplicate SKU inside this spreadsheet (first used on row ${seenSkuRows.get(skuKey)}).`);
+      }
+      if (status === "READY" && barcode) {
+        const barcodeKey = barcode.toLowerCase();
+        const dbBarcode = reference.existingBarcodes.get(barcodeKey);
+        if (dbBarcode) {
+          status = "DUPLICATE";
+          errors.push(`Barcode already exists in the system ("${dbBarcode}").`);
+        } else if (seenBarcodes.has(barcodeKey)) {
+          status = "DUPLICATE";
+          errors.push(`Duplicate barcode inside this spreadsheet (first used on row ${seenBarcodeRows.get(barcodeKey)}).`);
+        }
+      }
+    }
+    if (status === "INVALID") {
+      invalidCount++;
+    } else if (status === "DUPLICATE") {
+      duplicateCount++;
+    } else {
+      readyCount++;
+      if (sku) seenSkus.add(sku.toLowerCase());
+      if (sku) seenSkuRows.set(sku.toLowerCase(), parsedRow.rowNumber);
+      if (barcode) {
+        seenBarcodes.add(barcode.toLowerCase());
+        seenBarcodeRows.set(barcode.toLowerCase(), parsedRow.rowNumber);
+      }
+      if (normalizedName) {
+        seenNames.add(normalizedName);
+        seenNameRows.set(normalizedName, parsedRow.rowNumber);
+      }
+      if (hasStock) {
+        withStockCount++;
+        if (expiryDate && expiryDate < today) expiredBatchCount++;
+      }
+    }
+    rows.push({
+      rowNumber: parsedRow.rowNumber,
+      status,
+      errors,
+      warnings,
+      notes,
+      name,
+      genericName,
+      brandName,
+      sku,
+      barcode,
+      categoryName,
+      categoryId,
+      isNewCategory,
+      dosageForm,
+      strength,
+      unit,
+      packSize,
+      manufacturer,
+      description,
+      prescriptionRequired,
+      reorderLevel,
+      sellingPrice,
+      wholesalePrice,
+      initialQuantity,
+      hasStock,
+      batchNumber: hasStock ? batchNumber : null,
+      costPrice,
+      manufacturingDate: hasStock ? manufacturingDate : null,
+      expiryDate: hasStock ? expiryDate : null,
+      supplierName,
+      supplierId,
+      purchaseReference: hasStock ? purchaseReference : null,
+      stockNotes: hasStock ? stockNotes : null
+    });
+  }
+  for (const row of rows) {
+    if (row.status !== "READY") continue;
+    const result = coercedRowSchema.safeParse({
+      name: row.name,
+      sku: row.sku,
+      barcode: row.barcode,
+      sellingPrice: row.sellingPrice,
+      wholesalePrice: row.wholesalePrice,
+      packSize: row.packSize,
+      reorderLevel: row.reorderLevel,
+      initialQuantity: row.initialQuantity,
+      prescriptionRequired: row.prescriptionRequired,
+      manufacturingDate: row.manufacturingDate,
+      expiryDate: row.expiryDate
+    });
+    if (!result.success) {
+      row.status = "INVALID";
+      for (const issue of result.error.issues) {
+        row.errors.push(`${issue.path.join(".") || "row"}: ${issue.message}`);
+      }
+      readyCount--;
+      invalidCount++;
+      if (row.hasStock) withStockCount--;
+      if (row.sku) seenSkus.delete(row.sku.toLowerCase());
+      if (row.barcode) seenBarcodes.delete(row.barcode.toLowerCase());
+      if (row.name) seenNames.delete(normalizeProductName(row.name));
+    }
+  }
+  return {
+    rows,
+    summary: {
+      totalRows: rows.length,
+      readyCount,
+      duplicateCount,
+      invalidCount,
+      withStockCount,
+      withoutStockCount: readyCount - withStockCount,
+      skuGeneratedCount,
+      expiredBatchCount,
+      newCategories: [...newCategoryNames.values()]
+    },
+    unmappedColumns: workbook.mapping.unmappedLabels
+  };
+}
+
+// src/server/import/importService.ts
+var INSERT_CHUNK_SIZE = 400;
+function chunk(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+function toPreviewRow(row) {
+  return {
+    rowNumber: row.rowNumber,
+    status: row.status,
+    name: row.name,
+    sku: row.sku,
+    barcode: row.barcode,
+    categoryName: row.categoryName,
+    sellingPrice: row.sellingPrice,
+    costPrice: row.costPrice,
+    initialQuantity: row.initialQuantity,
+    hasStock: row.hasStock,
+    batchNumber: row.batchNumber,
+    expiryDate: row.expiryDate,
+    supplierName: row.supplierName,
+    errors: row.errors,
+    warnings: row.warnings,
+    notes: row.notes
+  };
+}
+async function loadReferenceData() {
+  const db = getDb();
+  if (!db) throw new ImportError("Database not connected.", "INVALID_FILE");
+  const [categories2, suppliers2, products2] = await Promise.all([
+    db.select({ id: schema_exports.categories.id, name: schema_exports.categories.name }).from(schema_exports.categories),
+    db.select({ id: schema_exports.suppliers.id, name: schema_exports.suppliers.name }).from(schema_exports.suppliers),
+    db.select({ sku: schema_exports.products.sku, barcode: schema_exports.products.barcode, name: schema_exports.products.name }).from(schema_exports.products)
+  ]);
+  const reference = {
+    categories: new Map(categories2.map((c) => [c.name.trim().toLowerCase(), c])),
+    suppliers: new Map(suppliers2.map((s) => [s.name.trim().toLowerCase(), s])),
+    existingSkus: /* @__PURE__ */ new Map(),
+    existingBarcodes: /* @__PURE__ */ new Map(),
+    existingNames: /* @__PURE__ */ new Map()
+  };
+  for (const product of products2) {
+    if (product.sku) reference.existingSkus.set(product.sku.trim().toLowerCase(), product.sku.trim());
+    if (product.barcode) reference.existingBarcodes.set(product.barcode.trim().toLowerCase(), product.barcode.trim());
+    if (product.name) {
+      const normalized = product.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (!reference.existingNames) reference.existingNames = /* @__PURE__ */ new Map();
+      if (!reference.existingNames.has(normalized)) reference.existingNames.set(normalized, product.name.trim());
+    }
+  }
+  return reference;
+}
+async function buildPreview(file) {
+  const workbook = parseProductWorkbook(file);
+  const reference = await loadReferenceData();
+  const validation = validateWorkbookRows(workbook, reference);
+  return { workbook, validation };
+}
+async function previewImport(file, _user) {
+  const { workbook, validation } = await buildPreview(file);
+  return {
+    fileName: workbook.fileName,
+    sheetName: workbook.sheetName,
+    headerRowNumber: workbook.headerRowNumber,
+    headers: workbook.headers,
+    columnMapping: workbook.headers.map((header, index) => ({
+      index,
+      header,
+      field: workbook.mapping.columnIndexToKey.get(index) ?? null
+    })),
+    mode: "ADD_NEW",
+    fileSizeBytes: file.buffer.length,
+    maxRows: MAX_ROWS,
+    maxFileBytes: MAX_FILE_BYTES,
+    skippedBlankRows: workbook.skippedBlankRows,
+    unmappedColumns: validation.unmappedColumns,
+    summary: validation.summary,
+    rows: validation.rows.map(toPreviewRow)
+  };
+}
+function isUniqueViolation(err) {
+  return err?.code === "23505" || String(err?.message || "").toLowerCase().includes("duplicate key");
+}
+function friendlyDbError(err) {
+  if (isUniqueViolation(err)) {
+    return "A product with this SKU or barcode already exists (it may have been created while this import was running). Nothing was imported - please refresh and try again.";
+  }
+  const pgMessage = err?.cause?.message || err?.original?.message || "";
+  const isSafePostgresMessage = typeof pgMessage === "string" && pgMessage.length > 0 && !/insert into|update\s|delete from|values\s*\(/i.test(pgMessage);
+  if (isSafePostgresMessage) {
+    return `The import was rejected by the database: ${pgMessage}. No changes were saved.`;
+  }
+  return "The import failed while writing to the database. No changes were saved. Please check the file and try again.";
+}
+async function confirmImport(file, user, mode = "ADD_NEW", ipAddress) {
+  const normalizedMode = String(mode || "ADD_NEW").toUpperCase();
+  if (normalizedMode !== "ADD_NEW") {
+    throw new ImportError(
+      "Only the 'Add New Products' import mode is currently enabled. Existing products are never overwritten by an import.",
+      "INVALID_FILE"
+    );
+  }
+  const db = getDb();
+  if (!db) throw new ImportError("Database not connected.", "INVALID_FILE");
+  const { workbook, validation } = await buildPreview(file);
+  const readyRows = validation.rows.filter((row) => row.status === "READY");
+  const { summary } = validation;
+  if (readyRows.length === 0) {
+    throw new ImportError(
+      `No valid rows to import: ${summary.duplicateCount} duplicate row(s) and ${summary.invalidCount} invalid row(s) were found. Fix the file and try again.`,
+      "NO_ROWS"
+    );
+  }
+  const fileName = workbook.fileName;
+  const stockRows = readyRows.filter((row) => row.hasStock);
+  const productIds = new Map(readyRows.map((row) => [row.rowNumber, randomUUID()]));
+  const batchIds = new Map(stockRows.map((row) => [row.rowNumber, randomUUID()]));
+  let categoriesCreated = 0;
+  try {
+    const result = await db.transaction(async (tx) => {
+      let categoryMap = new Map(
+        (await tx.select({ id: schema_exports.categories.id, name: schema_exports.categories.name }).from(schema_exports.categories)).map(
+          (c) => [c.name.trim().toLowerCase(), c]
+        )
+      );
+      const missingCategoryNames = [
+        ...new Set(
+          readyRows.map((row) => row.categoryName).filter((name) => !!name && !categoryMap.has(name.trim().toLowerCase()))
+        )
+      ];
+      if (missingCategoryNames.length > 0) {
+        await tx.insert(schema_exports.categories).values(missingCategoryNames.map((name) => ({ name }))).onConflictDoNothing();
+        categoriesCreated = missingCategoryNames.length;
+        categoryMap = new Map(
+          (await tx.select({ id: schema_exports.categories.id, name: schema_exports.categories.name }).from(schema_exports.categories)).map(
+            (c) => [c.name.trim().toLowerCase(), c]
+          )
+        );
+      }
+      const categoryIdFor = (row) => {
+        if (row.categoryId) return row.categoryId;
+        if (!row.categoryName) return null;
+        return categoryMap.get(row.categoryName.trim().toLowerCase())?.id ?? null;
+      };
+      const productValues = readyRows.map((row) => ({
+        id: productIds.get(row.rowNumber),
+        name: row.name,
+        genericName: row.genericName,
+        brandName: row.brandName,
+        sku: row.sku,
+        barcode: row.barcode,
+        categoryId: categoryIdFor(row),
+        dosageForm: row.dosageForm,
+        strength: row.strength,
+        unit: row.unit,
+        packSize: row.packSize,
+        manufacturer: row.manufacturer,
+        description: row.description,
+        prescriptionRequired: row.prescriptionRequired,
+        reorderLevel: row.reorderLevel,
+        sellingPrice: (row.sellingPrice ?? 0).toFixed(2),
+        wholesalePrice: row.wholesalePrice === null ? null : row.wholesalePrice.toFixed(2),
+        isActive: true
+      }));
+      for (const part of chunk(productValues, INSERT_CHUNK_SIZE)) {
+        await tx.insert(schema_exports.products).values(part);
+      }
+      const batchValues = stockRows.map((row) => ({
+        id: batchIds.get(row.rowNumber),
+        productId: productIds.get(row.rowNumber),
+        batchNumber: row.batchNumber,
+        supplierId: row.supplierId,
+        initialQuantity: row.initialQuantity,
+        currentQuantity: row.initialQuantity,
+        costPrice: (row.costPrice ?? 0).toFixed(2),
+        sellingPrice: (row.sellingPrice ?? 0).toFixed(2),
+        manufacturingDate: row.manufacturingDate,
+        expiryDate: row.expiryDate,
+        status: "ACTIVE",
+        notes: row.stockNotes || "Opening stock imported from Excel"
+      }));
+      for (const part of chunk(batchValues, INSERT_CHUNK_SIZE)) {
+        await tx.insert(schema_exports.batches).values(part);
+      }
+      const movementValues = stockRows.map((row) => ({
+        id: randomUUID(),
+        productId: productIds.get(row.rowNumber),
+        batchId: batchIds.get(row.rowNumber),
+        movementType: "INITIAL_STOCK",
+        quantityChange: row.initialQuantity,
+        previousQuantity: 0,
+        newQuantity: row.initialQuantity,
+        referenceId: row.purchaseReference || `IMPORT-${row.batchNumber}`,
+        reason: "Initial opening stock from Excel product import",
+        userId: user.id
+      }));
+      for (const part of chunk(movementValues, INSERT_CHUNK_SIZE)) {
+        await tx.insert(schema_exports.stockMovements).values(part);
+      }
+      const auditValues = [];
+      for (const row of readyRows) {
+        auditValues.push({
+          userId: user.id,
+          action: "PRODUCT_CREATED",
+          entityType: "PRODUCT",
+          entityId: productIds.get(row.rowNumber),
+          details: { name: row.name, sku: row.sku, barcode: row.barcode, source: "EXCEL_IMPORT" },
+          ipAddress: ipAddress ?? null
+        });
+      }
+      for (const row of stockRows) {
+        auditValues.push({
+          userId: user.id,
+          action: "INITIAL_STOCK_ADDED",
+          entityType: "BATCH",
+          entityId: batchIds.get(row.rowNumber),
+          details: {
+            productId: productIds.get(row.rowNumber),
+            productName: row.name,
+            batchNumber: row.batchNumber,
+            quantity: row.initialQuantity,
+            costPrice: row.costPrice ?? 0,
+            sellingPrice: row.sellingPrice ?? 0,
+            expiryDate: row.expiryDate,
+            source: "EXCEL_IMPORT"
+          },
+          ipAddress: ipAddress ?? null
+        });
+      }
+      auditValues.push({
+        userId: user.id,
+        action: "PRODUCT_EXCEL_IMPORT",
+        entityType: "PRODUCT_IMPORT",
+        entityId: null,
+        details: {
+          fileName,
+          sheet: workbook.sheetName,
+          rows: summary.totalRows,
+          imported: readyRows.length,
+          duplicates: summary.duplicateCount,
+          invalid: summary.invalidCount,
+          productsCreated: readyRows.length,
+          batchesCreated: stockRows.length,
+          movementsCreated: stockRows.length
+        },
+        ipAddress: ipAddress ?? null
+      });
+      for (const part of chunk(auditValues, INSERT_CHUNK_SIZE)) {
+        await tx.insert(schema_exports.auditLogs).values(part);
+      }
+      const [historyRow] = await tx.insert(schema_exports.productImports).values({
+        fileName,
+        uploadedBy: user.id,
+        mode: "ADD_NEW",
+        totalRows: summary.totalRows,
+        importedRows: readyRows.length,
+        duplicateRows: summary.duplicateCount,
+        failedRows: summary.invalidCount,
+        stockRows: stockRows.length,
+        batchesCreated: stockRows.length,
+        movementsCreated: stockRows.length,
+        categoriesCreated,
+        status: "COMPLETED",
+        errorMessage: null,
+        completedAt: /* @__PURE__ */ new Date()
+      }).returning();
+      return { historyRow };
+    });
+    await broadcastRealtimeEvent("PRODUCT_CREATED", {
+      source: "EXCEL_IMPORT",
+      importId: result.historyRow.id,
+      count: readyRows.length,
+      fileName,
+      createdBy: user.id
+    });
+    await broadcastRealtimeEvent("STOCK_UPDATED", {
+      source: "EXCEL_IMPORT",
+      importId: result.historyRow.id,
+      batches: stockRows.length,
+      action: "EXCEL_IMPORT"
+    });
+    return {
+      importId: result.historyRow.id,
+      fileName,
+      mode: "ADD_NEW",
+      totalRows: summary.totalRows,
+      imported: readyRows.length,
+      duplicates: summary.duplicateCount,
+      invalid: summary.invalidCount,
+      productsCreated: readyRows.length,
+      batchesCreated: stockRows.length,
+      movementsCreated: stockRows.length,
+      categoriesCreated,
+      withStock: stockRows.length,
+      withoutStock: readyRows.length - stockRows.length,
+      completedAt: result.historyRow.completedAt ? new Date(result.historyRow.completedAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString()
+    };
+  } catch (err) {
+    const message = friendlyDbError(err);
+    try {
+      await db.insert(schema_exports.productImports).values({
+        fileName,
+        uploadedBy: user.id,
+        mode: "ADD_NEW",
+        totalRows: summary.totalRows,
+        importedRows: 0,
+        duplicateRows: summary.duplicateCount,
+        failedRows: summary.invalidCount,
+        stockRows: 0,
+        batchesCreated: 0,
+        movementsCreated: 0,
+        categoriesCreated: 0,
+        status: "FAILED",
+        errorMessage: message.slice(0, 1e3),
+        completedAt: /* @__PURE__ */ new Date()
+      });
+    } catch (historyErr) {
+      console.error("[Product Import] Could not record failed import:", historyErr);
+    }
+    console.error("[Product Import] Transaction rolled back:", err);
+    if (err instanceof ImportError) throw err;
+    throw new ImportError(message, isUniqueViolation(err) ? "DB_CONFLICT" : "INVALID_FILE");
+  }
+}
+async function getImportHistory(limit = 25) {
+  const db = getDb();
+  if (!db) throw new ImportError("Database not connected.", "INVALID_FILE");
+  const list = await db.select({
+    id: schema_exports.productImports.id,
+    fileName: schema_exports.productImports.fileName,
+    mode: schema_exports.productImports.mode,
+    uploadedBy: schema_exports.productImports.uploadedBy,
+    uploadedByName: schema_exports.users.fullName,
+    totalRows: schema_exports.productImports.totalRows,
+    importedRows: schema_exports.productImports.importedRows,
+    duplicateRows: schema_exports.productImports.duplicateRows,
+    failedRows: schema_exports.productImports.failedRows,
+    stockRows: schema_exports.productImports.stockRows,
+    batchesCreated: schema_exports.productImports.batchesCreated,
+    movementsCreated: schema_exports.productImports.movementsCreated,
+    categoriesCreated: schema_exports.productImports.categoriesCreated,
+    status: schema_exports.productImports.status,
+    errorMessage: schema_exports.productImports.errorMessage,
+    createdAt: schema_exports.productImports.createdAt,
+    completedAt: schema_exports.productImports.completedAt
+  }).from(schema_exports.productImports).leftJoin(schema_exports.users, eq3(schema_exports.productImports.uploadedBy, schema_exports.users.id)).orderBy(desc(schema_exports.productImports.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+  return list.map((item) => ({
+    ...item,
+    createdAt: item.createdAt instanceof Date ? item.createdAt.toISOString() : String(item.createdAt),
+    completedAt: item.completedAt ? item.completedAt instanceof Date ? item.completedAt.toISOString() : String(item.completedAt) : null
+  }));
+}
+
+// src/server/import/template.ts
+import * as XLSX2 from "xlsx";
+var TEMPLATE_FILE_NAME = "Empress-Oris-Product-Import-Template.xlsx";
+var PRODUCT_HEADERS = COLUMNS.map((c) => c.label);
+var INSTRUCTIONS = [
+  ["Empress Oris Herbal & Mart - Excel Product Import", ""],
+  ["", ""],
+  ["HOW TO USE", ""],
+  ["1.", "Enter your products on the 'Products' sheet, one product per row, starting directly under the header row."],
+  ["2.", "Do not rename, reorder or remove the header cells - required headers must remain present."],
+  ["3.", "Save the file and upload it with 'Import Products' in the Product Catalog."],
+  ["4.", "Review the import preview carefully, then confirm. Nothing is saved before you confirm."],
+  ["", ""],
+  ["REQUIRED COLUMNS", ""],
+  ...COLUMNS.filter((c) => c.required).map((c) => [c.label, c.hint]),
+  ["", ""],
+  ["OPTIONAL COLUMNS", ""],
+  ...COLUMNS.filter((c) => !c.required).map((c) => [c.label, c.hint]),
+  ["", ""],
+  ["VALUE RULES", ""],
+  ["Prices", "Plain numbers in Ghana Cedis (GH\u20B5). Example: 10.50 - NOT 'GHS 10.50', '10,50' or negative values."],
+  ["Dates", "DD/MM/YYYY (Ghana convention) or YYYY-MM-DD. Excel date cells are also accepted."],
+  ["Booleans", "Prescription Required accepts: Yes, No, TRUE, FALSE, 1, 0."],
+  ["SKU", "Must be unique. Leave blank to have a unique SKU generated automatically."],
+  ["Barcode", "Optional, but must be unique when supplied."],
+  ["Initial Stock", "When Initial Quantity > 0 a Batch Number and Expiry Date are required (batch/FEFO tracking)."],
+  ["Initial Quantity", "0 or blank = product imported without stock (add stock later via Add Stock)."],
+  ["Category", "Enter an existing category name or a new one - new categories are created automatically."],
+  ["Supplier", "Must match an existing supplier name to be linked; otherwise the batch imports without a supplier."],
+  ["Images", "Product images are not imported from Excel - upload them afterwards (Supabase Storage)."],
+  ["Limits", "Maximum 5 MB file, up to 5,000 product rows per import. .xlsx and .xls are supported."],
+  ["Currency", "All prices are interpreted as Ghana Cedi (GH\u20B5 / GHS) amounts. No conversion is applied."]
+];
+function autosizeWidths(rows, min = 12, max = 60) {
+  return rows[0].map((_, columnIndex) => {
+    const width = rows.reduce((widest, row) => {
+      const cell = row[columnIndex];
+      const length = cell === null || cell === void 0 ? 0 : String(cell).length;
+      return Math.max(widest, length);
+    }, min);
+    return { wch: Math.min(max, width + 2) };
+  });
+}
+function buildTemplateBuffer() {
+  const workbook = XLSX2.utils.book_new();
+  const productsSheet = XLSX2.utils.aoa_to_sheet([PRODUCT_HEADERS]);
+  productsSheet["!cols"] = autosizeWidths([PRODUCT_HEADERS], 16, 34);
+  XLSX2.utils.book_append_sheet(workbook, productsSheet, "Products");
+  const instructionsSheet = XLSX2.utils.aoa_to_sheet(INSTRUCTIONS);
+  instructionsSheet["!cols"] = [{ wch: 44 }, { wch: 110 }];
+  XLSX2.utils.book_append_sheet(workbook, instructionsSheet, "Instructions");
+  const example = [PRODUCT_HEADERS];
+  example.push([
+    "Paracetamol 500mg",
+    // Product Name *
+    "Paracetamol",
+    // Generic Name
+    "Panadol",
+    // Brand
+    "PARA500",
+    // SKU
+    "123456789012",
+    // Barcode
+    "Analgesics",
+    // Category
+    "Tablet",
+    // Dosage Form
+    "500mg",
+    // Strength
+    "Pack",
+    // Unit
+    12,
+    // Pack Size
+    "Ernest Chemist",
+    // Manufacturer
+    "Pain relief tablet",
+    // Description
+    "No",
+    // Prescription Required
+    10,
+    // Reorder Level
+    10,
+    // Selling Price (GH\u20B5) *
+    8.5,
+    // Wholesale Price (GH\u20B5)
+    100,
+    // Initial Quantity
+    "B001",
+    // Batch Number
+    7,
+    // Cost Price (GH\u20B5)
+    "01/05/2026",
+    // Manufacturing Date
+    "30/05/2028",
+    // Expiry Date
+    "Ernest Chemist Ltd",
+    // Supplier
+    "INV-2026-001",
+    // Purchase Reference
+    "Opening stock"
+    // Stock Notes
+  ]);
+  const exampleSheet = XLSX2.utils.aoa_to_sheet(example);
+  exampleSheet["!cols"] = autosizeWidths(example, 16, 30);
+  XLSX2.utils.book_append_sheet(workbook, exampleSheet, "Example");
+  return XLSX2.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+function templateFileName() {
+  return TEMPLATE_FILE_NAME;
+}
+function buildErrorReportBuffer(entries) {
+  const rows = [["Row", "Product Name", "Error Type", "Error Message"]];
+  for (const entry of entries) {
+    rows.push([
+      entry.rowNumber,
+      entry.productName ?? "",
+      entry.errorType,
+      entry.message
+    ]);
+  }
+  const sheet = XLSX2.utils.aoa_to_sheet(rows);
+  sheet["!cols"] = [{ wch: 8 }, { wch: 40 }, { wch: 14 }, { wch: 110 }];
+  const workbook = XLSX2.utils.book_new();
+  XLSX2.utils.book_append_sheet(workbook, sheet, "Import Errors");
+  return XLSX2.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+function errorReportFileName() {
+  const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  return `Product-Import-Errors-${stamp}.xlsx`;
+}
+
+// src/server/routes/import.ts
+var importRouter = Router2();
+var ALLOWED_EXTENSIONS2 = [".xlsx", ".xls"];
+var excelUpload = multer({
   storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_BYTES },
+  fileFilter: (req, file, cb) => {
+    const name = String(file.originalname || "").toLowerCase();
+    const extension = name.slice(name.lastIndexOf("."));
+    const mimeOk = !file.mimetype || [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/octet-stream",
+      "application/binary",
+      "application/x-ole-storage",
+      "application/x-ole-object"
+    ].includes(file.mimetype.toLowerCase());
+    cb(null, ALLOWED_EXTENSIONS2.includes(extension) && mimeOk);
+  }
+});
+function toUploadedFile(file) {
+  return {
+    buffer: file.buffer,
+    originalName: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  };
+}
+function sendImportError(res, err, context) {
+  if (err instanceof ImportError) {
+    const status = err.code === "DB_CONFLICT" ? 409 : err.code === "TOO_MANY_ROWS" ? 413 : 400;
+    return res.status(status).json({ error: err.message, code: err.code });
+  }
+  console.error(`[Product Import] ${context} failed:`, err);
+  return res.status(500).json({
+    error: "The import failed unexpectedly. No changes were saved. Please try again."
+  });
+}
+function requireDatabase(res) {
+  if (!getDb()) {
+    res.status(503).json({ error: "Database not connected." });
+    return false;
+  }
+  return true;
+}
+importRouter.get(
+  "/template",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  (req, res) => {
+    try {
+      const buffer = buildTemplateBuffer();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${templateFileName()}"`);
+      res.setHeader("Content-Length", buffer.length);
+      return res.end(buffer);
+    } catch (err) {
+      return sendImportError(res, err, "Template generation");
+    }
+  }
+);
+importRouter.post(
+  "/preview",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  excelUpload.single("file"),
+  async (req, res) => {
+    if (!requireDatabase(res)) return;
+    if (!req.file) {
+      return res.status(400).json({
+        error: "A valid Excel file is required (.xlsx or .xls, maximum 5 MB)."
+      });
+    }
+    try {
+      const result = await previewImport(toUploadedFile(req.file), req.user);
+      return res.json(result);
+    } catch (err) {
+      return sendImportError(res, err, "Preview");
+    }
+  }
+);
+importRouter.post(
+  "/confirm",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  excelUpload.single("file"),
+  async (req, res) => {
+    if (!requireDatabase(res)) return;
+    if (!req.file) {
+      return res.status(400).json({
+        error: "A valid Excel file is required (.xlsx or .xls, maximum 5 MB)."
+      });
+    }
+    try {
+      const result = await confirmImport(
+        toUploadedFile(req.file),
+        req.user,
+        req.body?.mode || "ADD_NEW",
+        req.ip
+      );
+      return res.status(201).json({ success: true, result });
+    } catch (err) {
+      return sendImportError(res, err, "Confirm");
+    }
+  }
+);
+var errorReportSchema = z2.object({
+  entries: z2.array(
+    z2.object({
+      rowNumber: z2.number().int().min(1),
+      productName: z2.string().max(300).nullable(),
+      errorType: z2.string().max(60),
+      message: z2.string().max(1e3)
+    })
+  ).min(1).max(6e3)
+});
+importRouter.post(
+  "/error-report",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  (req, res) => {
+    try {
+      const parsed = errorReportSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid error report payload." });
+      }
+      const buffer = buildErrorReportBuffer(parsed.data.entries);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${errorReportFileName()}"`);
+      res.setHeader("Content-Length", buffer.length);
+      return res.end(buffer);
+    } catch (err) {
+      return sendImportError(res, err, "Error report");
+    }
+  }
+);
+importRouter.get(
+  "/history",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  async (req, res) => {
+    if (!requireDatabase(res)) return;
+    try {
+      const history = await getImportHistory();
+      return res.json({ history });
+    } catch (err) {
+      return sendImportError(res, err, "History");
+    }
+  }
+);
+
+// src/server/routes/products.ts
+import { Router as Router3 } from "express";
+import multer2 from "multer";
+import { eq as eq4 } from "drizzle-orm";
+var productsRouter = Router3();
+var upload = multer2({
+  storage: multer2.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   // 5MB
   fileFilter: (req, file, cb) => {
@@ -1104,7 +3075,7 @@ var upload = multer({
 productsRouter.post(
   "/upload-image",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   upload.single("image"),
   async (req, res) => {
     if (!req.file) {
@@ -1181,7 +3152,7 @@ productsRouter.get("/", requireAuthentication, async (req, res) => {
             )` : ""}
       GROUP BY p.id, c.name
       ${lowStock === "true" ? "HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level" : ""}
-      ORDER BY p.created_at DESC
+      ORDER BY ${search ? `CASE WHEN p.name ILIKE '${String(search).replace(/'/g, "''")}%' THEN 0 ELSE 1 END, p.name ASC` : "p.name ASC"}
     `;
     const result = await rawSql.unsafe(query);
     return res.json({ products: result });
@@ -1239,7 +3210,7 @@ productsRouter.get("/:id", requireAuthentication, async (req, res) => {
 productsRouter.post(
   "/",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   async (req, res) => {
     const db = getDb();
     const rawSql = getRawSql();
@@ -1291,12 +3262,12 @@ productsRouter.post(
       }
     }
     try {
-      const [existingSku] = await db.select().from(schema_exports.products).where(eq3(schema_exports.products.sku, sku)).limit(1);
+      const [existingSku] = await db.select().from(schema_exports.products).where(eq4(schema_exports.products.sku, sku)).limit(1);
       if (existingSku) {
         return res.status(400).json({ error: `A product with SKU '${sku}' already exists.` });
       }
       if (barcode) {
-        const [existingBarcode] = await db.select().from(schema_exports.products).where(eq3(schema_exports.products.barcode, barcode)).limit(1);
+        const [existingBarcode] = await db.select().from(schema_exports.products).where(eq4(schema_exports.products.barcode, barcode)).limit(1);
         if (existingBarcode) {
           return res.status(400).json({ error: `A product with Barcode '${barcode}' already exists.` });
         }
@@ -1407,7 +3378,7 @@ productsRouter.post(
 productsRouter.put(
   "/:id",
   requireAuthentication,
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   async (req, res) => {
     const db = getDb();
     if (!db) return res.status(503).json({ error: "Database not connected." });
@@ -1432,27 +3403,32 @@ productsRouter.put(
       isActive
     } = req.body;
     try {
-      const [updated] = await db.update(schema_exports.products).set({
-        name,
-        genericName,
-        brandName,
-        sku,
-        barcode,
-        categoryId: categoryId || null,
-        dosageForm,
-        strength,
-        unit,
-        packSize: packSize ? parseInt(packSize) : 1,
-        manufacturer,
-        description,
-        prescriptionRequired: !!prescriptionRequired,
-        imageUrl,
-        reorderLevel: reorderLevel ? parseInt(reorderLevel) : 10,
-        sellingPrice: sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00",
-        wholesalePrice: wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null,
-        isActive: isActive !== void 0 ? !!isActive : true,
-        updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq3(schema_exports.products.id, req.params.id)).returning();
+      if (barcode !== void 0 && barcode) {
+        const [existingBarcode] = await db.select().from(schema_exports.products).where(eq4(schema_exports.products.barcode, String(barcode).trim())).limit(1);
+        if (existingBarcode && existingBarcode.id !== req.params.id) {
+          return res.status(400).json({ error: `A product with Barcode '${barcode}' already exists.` });
+        }
+      }
+      const updateData = { updatedAt: /* @__PURE__ */ new Date() };
+      if (name !== void 0) updateData.name = name;
+      if (genericName !== void 0) updateData.genericName = genericName;
+      if (brandName !== void 0) updateData.brandName = brandName;
+      if (sku !== void 0) updateData.sku = sku;
+      if (barcode !== void 0) updateData.barcode = barcode ? String(barcode).trim() : null;
+      if (categoryId !== void 0) updateData.categoryId = categoryId || null;
+      if (dosageForm !== void 0) updateData.dosageForm = dosageForm;
+      if (strength !== void 0) updateData.strength = strength;
+      if (unit !== void 0) updateData.unit = unit;
+      if (packSize !== void 0) updateData.packSize = packSize ? parseInt(packSize) : 1;
+      if (manufacturer !== void 0) updateData.manufacturer = manufacturer;
+      if (description !== void 0) updateData.description = description;
+      if (prescriptionRequired !== void 0) updateData.prescriptionRequired = !!prescriptionRequired;
+      if (imageUrl !== void 0) updateData.imageUrl = imageUrl;
+      if (reorderLevel !== void 0) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 10;
+      if (sellingPrice !== void 0) updateData.sellingPrice = sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00";
+      if (wholesalePrice !== void 0) updateData.wholesalePrice = wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null;
+      if (isActive !== void 0) updateData.isActive = !!isActive;
+      const [updated] = await db.update(schema_exports.products).set(updateData).where(eq4(schema_exports.products.id, req.params.id)).returning();
       if (!updated) {
         return res.status(404).json({ error: "Product not found." });
       }
@@ -1471,10 +3447,44 @@ productsRouter.put(
     }
   }
 );
+async function updateProductPrice(req, res) {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "Database not connected." });
+  const { sellingPrice, wholesalePrice } = req.body || {};
+  try {
+    const updateData = { updatedAt: /* @__PURE__ */ new Date() };
+    if (sellingPrice !== void 0) {
+      updateData.sellingPrice = sellingPrice === null || sellingPrice === "" ? "0.00" : parseFloat(sellingPrice).toFixed(2);
+    }
+    if (wholesalePrice !== void 0) {
+      updateData.wholesalePrice = wholesalePrice === null || wholesalePrice === "" ? null : parseFloat(wholesalePrice).toFixed(2);
+    }
+    const [updated] = await db.update(schema_exports.products).set(updateData).where(eq4(schema_exports.products.id, req.params.id)).returning();
+    if (!updated) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    await db.insert(schema_exports.auditLogs).values({
+      userId: req.user?.id,
+      action: "PRODUCT_PRICE_UPDATED",
+      entityType: "PRODUCT",
+      entityId: updated.id,
+      details: { sellingPrice: updated.sellingPrice, wholesalePrice: updated.wholesalePrice },
+      ipAddress: req.ip
+    });
+    await broadcastRealtimeEvent("PRODUCT_UPDATED", { product: updated });
+    return res.json({ success: true, product: updated });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to update product price." });
+  }
+}
+productsRouter.put("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.patch("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.post("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.put("/:id/update-price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
 
 // src/server/routes/stock.ts
-import { Router as Router3 } from "express";
-var stockRouter = Router3();
+import { Router as Router4 } from "express";
+var stockRouter = Router4();
 stockRouter.post(
   "/add",
   requireAuthentication,
@@ -1514,6 +3524,9 @@ stockRouter.post(
           }
           prevQty = existingBatch.current_quantity;
           newQty = prevQty + parseInt(quantity);
+          if (newQty < 0) {
+            throw new Error(`Insufficient batch stock. Current quantity is ${prevQty}, cannot reduce by ${Math.abs(parseInt(quantity))}.`);
+          }
           const [updatedBatch] = await tx`
             UPDATE batches 
             SET 
@@ -1525,6 +3538,12 @@ stockRouter.post(
             RETURNING *
           `;
           targetBatch = updatedBatch;
+          if (sellingPrice) {
+            await tx`
+              UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+              WHERE id = ${productId}
+            `;
+          }
         } else {
           if (!batchNumber) {
             throw new Error("Batch number is required for a new batch.");
@@ -1539,13 +3558,25 @@ stockRouter.post(
           if (duplicateBatch) {
             prevQty = duplicateBatch.current_quantity;
             newQty = prevQty + parseInt(quantity);
+            if (newQty < 0) {
+              throw new Error(`Insufficient batch stock. Current quantity is ${prevQty}, cannot reduce by ${Math.abs(parseInt(quantity))}.`);
+            }
             const [updatedBatch] = await tx`
               UPDATE batches 
-              SET current_quantity = ${newQty}, updated_at = NOW()
+              SET current_quantity = ${newQty},
+                  cost_price = ${costPrice ? parseFloat(costPrice) : duplicateBatch.cost_price},
+                  selling_price = ${sellingPrice ? parseFloat(sellingPrice) : duplicateBatch.selling_price},
+                  updated_at = NOW()
               WHERE id = ${duplicateBatch.id}
               RETURNING *
             `;
             targetBatch = updatedBatch;
+            if (sellingPrice) {
+              await tx`
+                 UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+                 WHERE id = ${productId}
+               `;
+            }
           } else {
             prevQty = 0;
             newQty = parseInt(quantity);
@@ -1562,6 +3593,12 @@ stockRouter.post(
               RETURNING *
             `;
             targetBatch = newBatch;
+            if (sellingPrice) {
+              await tx`
+                 UPDATE products SET selling_price = ${parseFloat(sellingPrice)}, updated_at = NOW()
+                 WHERE id = ${productId}
+               `;
+            }
           }
         }
         const [movement] = await tx`
@@ -1732,8 +3769,8 @@ stockRouter.get("/movements", requireAuthentication, async (req, res) => {
 });
 
 // src/server/routes/pos.ts
-import { Router as Router4 } from "express";
-var posRouter = Router4();
+import { Router as Router5 } from "express";
+var posRouter = Router5();
 posRouter.get("/search", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
@@ -1752,32 +3789,32 @@ posRouter.get("/search", requireAuthentication, async (req, res) => {
         SELECT 
           p.id,
           p.name,
-          p.generic_name,
-          p.brand_name,
+          p.generic_name AS "genericName",
+          p.brand_name AS "brandName",
           p.sku,
           p.barcode,
-          p.dosage_form,
+          p.dosage_form AS "dosageForm",
           p.strength,
           p.unit,
-          p.pack_size,
-          p.prescription_required,
-          p.image_url,
-          p.selling_price,
-          p.reorder_level,
-          c.name as category_name,
-          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
+          p.pack_size AS "packSize",
+          p.prescription_required AS "prescriptionRequired",
+          p.image_url AS "imageUrl",
+          p.selling_price AS "sellingPrice",
+          p.reorder_level AS "reorderLevel",
+          c.name AS "categoryName",
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer AS "totalStock",
           COALESCE(
             json_agg(
               json_build_object(
                 'id', b.id,
-                'batch_number', b.batch_number,
-                'current_quantity', b.current_quantity,
-                'expiry_date', b.expiry_date,
-                'selling_price', b.selling_price
+                'batchNumber', b.batch_number,
+                'currentQuantity', b.current_quantity,
+                'expiryDate', b.expiry_date,
+                'sellingPrice', b.selling_price
               ) ORDER BY b.expiry_date ASC
             ) FILTER (WHERE b.id IS NOT NULL AND b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE),
             '[]'::json
-          ) as available_batches
+          ) AS "availableBatches"
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
         LEFT JOIN batches b ON p.id = b.product_id
@@ -1801,32 +3838,32 @@ posRouter.get("/search", requireAuthentication, async (req, res) => {
       SELECT 
         p.id,
         p.name,
-        p.generic_name,
-        p.brand_name,
+        p.generic_name AS "genericName",
+        p.brand_name AS "brandName",
         p.sku,
         p.barcode,
-        p.dosage_form,
+        p.dosage_form AS "dosageForm",
         p.strength,
         p.unit,
-        p.pack_size,
-        p.prescription_required,
-        p.image_url,
-        p.selling_price,
-        p.reorder_level,
-        c.name as category_name,
-        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
+        p.pack_size AS "packSize",
+        p.prescription_required AS "prescriptionRequired",
+        p.image_url AS "imageUrl",
+        p.selling_price AS "sellingPrice",
+        p.reorder_level AS "reorderLevel",
+        c.name AS "categoryName",
+        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer AS "totalStock",
         COALESCE(
           json_agg(
             json_build_object(
               'id', b.id,
-              'batch_number', b.batch_number,
-              'current_quantity', b.current_quantity,
-              'expiry_date', b.expiry_date,
-              'selling_price', b.selling_price
+              'batchNumber', b.batch_number,
+              'currentQuantity', b.current_quantity,
+              'expiryDate', b.expiry_date,
+              'sellingPrice', b.selling_price
             ) ORDER BY b.expiry_date ASC
           ) FILTER (WHERE b.id IS NOT NULL AND b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE),
           '[]'::json
-        ) as available_batches
+        ) AS "availableBatches"
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN batches b ON p.id = b.product_id
@@ -1840,7 +3877,7 @@ posRouter.get("/search", requireAuthentication, async (req, res) => {
       )` : rawSql``}
       ${cat ? rawSql`AND p.category_id = ${cat}` : rawSql``}
       GROUP BY p.id, c.name
-      ORDER BY p.name ASC
+      ORDER BY ${qStr ? rawSql`CASE WHEN p.name ILIKE ${String(query).trim() + "%"} THEN 0 ELSE 1 END, p.name ASC` : rawSql`p.name ASC`}
       LIMIT 30
     `;
     return res.json({ products: products2 });
@@ -1863,13 +3900,18 @@ posRouter.post("/checkout", requireAuthentication, async (req, res) => {
     amountReceived,
     transactionReference,
     discount = 0,
-    notes
+    notes,
+    offlineSaleId
+    // optional client-generated id for idempotent offline sync
   } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart is empty. At least one item is required." });
   }
   if (!paymentMethod) {
     return res.status(400).json({ error: "Payment method is required." });
+  }
+  if (offlineSaleId && paymentMethod !== "CASH") {
+    return res.status(400).json({ error: "Offline sales are cash-only." });
   }
   try {
     const [activeShift] = await rawSql.unsafe(`
@@ -1885,7 +3927,13 @@ posRouter.post("/checkout", requireAuthentication, async (req, res) => {
       });
     }
     const [pharmacy] = await db.select().from(schema_exports.pharmacySettings).limit(1);
-    const receiptNumber = `GH-REC-${Date.now().toString().slice(-6)}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+    if (offlineSaleId) {
+      const [existing] = await rawSql.unsafe(`SELECT * FROM sales WHERE receipt_number = '${offlineSaleId}' LIMIT 1`);
+      if (existing) {
+        return res.json({ success: true, receipt: existing, alreadySynced: true });
+      }
+    }
+    const receiptNumber = offlineSaleId ? String(offlineSaleId) : `GH-REC-${Date.now().toString().slice(-6)}-${Math.floor(1e3 + Math.random() * 9e3)}`;
     const result = await rawSql.begin(async (tx) => {
       let subtotal = 0;
       let totalCostOfGoodsSold = 0;
@@ -1935,6 +3983,7 @@ posRouter.post("/checkout", requireAuthentication, async (req, res) => {
           const batchCost = unitCost * qtyFromThisBatch;
           itemTotalCost += batchCost;
           totalCostOfGoodsSold += batchCost;
+          console.log(`[POS COGS] Batch ${b.batch_number}: cost_price=GH\u20B5${unitCost}, qty=${qtyFromThisBatch}, batchCost=GH\u20B5${batchCost}`);
           batchAllocations.push({
             batchId: b.id,
             batchNumber: b.batch_number,
@@ -2032,11 +4081,12 @@ posRouter.post("/checkout", requireAuthentication, async (req, res) => {
         pharmacy
       };
     });
-    await broadcastRealtimeEvent("SALE_COMPLETED", {
+    void broadcastRealtimeEvent("SALE_COMPLETED", {
       saleId: result.sale.id,
       receiptNumber: result.sale.receipt_number,
       totalAmount: result.sale.total_amount,
       cashierId: req.user?.id
+    }).catch(() => {
     });
     return res.status(201).json({
       success: true,
@@ -2069,8 +4119,8 @@ posRouter.post("/checkout", requireAuthentication, async (req, res) => {
 });
 
 // src/server/routes/sales.ts
-import { Router as Router5 } from "express";
-var salesRouter = Router5();
+import { Router as Router6 } from "express";
+var salesRouter = Router6();
 salesRouter.get("/", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
@@ -2247,10 +4297,43 @@ salesRouter.post(
     }
   }
 );
+async function clearAllSales(req, res) {
+  const rawSql = getRawSql();
+  const db = getDb();
+  if (!rawSql || !db) return res.status(503).json({ error: "Database not connected." });
+  try {
+    await rawSql.begin(async (tx) => {
+      await tx`DELETE FROM sale_batches WHERE sale_item_id IN (SELECT id FROM sale_items)`;
+      await tx`DELETE FROM refund_items WHERE refund_id IN (SELECT id FROM refunds)`;
+      await tx`DELETE FROM refunds`;
+      await tx`DELETE FROM payments WHERE sale_id IN (SELECT id FROM sales)`;
+      await tx`DELETE FROM sale_items`;
+      await tx`DELETE FROM sales`;
+      await tx`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address)
+        VALUES (
+          ${req.user?.id || null}, 'SALES_CLEARED', 'SALE', NULL,
+          ${JSON.stringify({ clearedBy: req.user?.id || null, clearedAt: (/* @__PURE__ */ new Date()).toISOString() })},
+          ${req.ip || null}
+        )
+      `;
+    });
+    await broadcastRealtimeEvent("SALES_CLEARED", { clearedBy: req.user?.id || null });
+    return res.json({ success: true, message: "All sales records cleared successfully." });
+  } catch (err) {
+    console.error("[Clear Sales] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to clear sales." });
+  }
+}
+salesRouter.delete("/", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.delete("/clear", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.post("/clear", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.delete("/all", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
+salesRouter.post("/clear-all", requireAuthentication, requireRole(["OWNER"]), clearAllSales);
 
 // src/server/routes/shifts.ts
-import { Router as Router6 } from "express";
-var shiftsRouter = Router6();
+import { Router as Router7 } from "express";
+var shiftsRouter = Router7();
 shiftsRouter.get("/current", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
@@ -2321,6 +4404,57 @@ shiftsRouter.post("/open", requireAuthentication, async (req, res) => {
       )
     `);
     await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: req.user?.id, status: "OPEN" });
+    try {
+      const [settings] = await rawSql.unsafe(`SELECT name, sms_notifications_enabled, sms_recipient_phone, phone FROM pharmacy_settings LIMIT 1`);
+      const [cashier] = await rawSql.unsafe(`SELECT full_name FROM users WHERE id = '${req.user?.id}' LIMIT 1`);
+      const recipient = settings?.sms_recipient_phone || settings?.phone;
+      const cashierName = cashier?.full_name || "Cashier";
+      const openingAmount = parseFloat(openingCash) || 0;
+      const message = [
+        "EMPRESS ORIS POS - SHIFT OPENED",
+        "",
+        `Cashier: ${cashierName}`,
+        `Opening Cash: GH\u20B5${openingAmount.toFixed(2)}`,
+        `Date: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-GB")}`,
+        `Time: ${(/* @__PURE__ */ new Date()).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`,
+        "",
+        "Your cashier has started a new shift."
+      ].join("\\n");
+      const refId = `shift-sms-open-${shift.id}`;
+      const [existing2] = await rawSql.unsafe(`SELECT id FROM sms_outbox WHERE reference_id = '${refId}' LIMIT 1`);
+      if (!existing2) {
+        const [outboxRow] = await rawSql.unsafe(`
+          INSERT INTO sms_outbox (event_type, recipient, message, status, reference_id)
+          VALUES ('SHIFT_OPENED', ${recipient ? `'${recipient}'` : "NULL"}, '${message.replace(/'/g, "''")}', 'PENDING', '${refId}')
+          RETURNING id
+        `);
+        if (outboxRow?.id) {
+          (async () => {
+            try {
+              if (!settings?.sms_notifications_enabled) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SKIPPED', last_error = 'SMS disabled by owner' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              if (!recipient) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', last_error = 'No recipient phone configured' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              const { sendSms: sendSms2 } = await Promise.resolve().then(() => (init_sasuSync(), sasuSync_exports));
+              const result = await sendSms2(recipient, message, `shift:${shift.id}:opened`);
+              if (result.success) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW() WHERE id = '${outboxRow.id}'`);
+              } else {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+              }
+            } catch (e) {
+              await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(e?.message || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+            }
+          })();
+        }
+      }
+    } catch (smsErr) {
+      console.error("[Shift SMS] Failed to queue opening SMS:", smsErr);
+    }
     return res.status(201).json({ success: true, shift });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Failed to open shift." });
@@ -2334,7 +4468,7 @@ shiftsRouter.post("/close", requireAuthentication, async (req, res) => {
     return res.status(400).json({ error: "Actual cash count is required to close shift." });
   }
   try {
-    const isOwner = req.user?.role === "OWNER";
+    const isOwner = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
     let activeShift;
     if (isOwner && shiftId) {
       [activeShift] = await rawSql.unsafe(`
@@ -2393,6 +4527,100 @@ shiftsRouter.post("/close", requireAuthentication, async (req, res) => {
         '${JSON.stringify({ expectedCash, actualCash: actualCashNum, discrepancy })}'::jsonb
       )
     `);
+    try {
+      const [settings] = await rawSql.unsafe(`SELECT name, sms_notifications_enabled, sms_recipient_phone, phone FROM pharmacy_settings LIMIT 1`);
+      const [cashier] = await rawSql.unsafe(`SELECT full_name FROM users WHERE id = '${activeShift.cashier_id}' LIMIT 1`);
+      const pharmacyName = settings?.name || "Empress Oris Pharmacy";
+      const cashierName = cashier?.full_name || "Cashier";
+      const recipient = settings?.sms_recipient_phone || settings?.phone;
+      const productRows = await rawSql.unsafe(`
+        SELECT p.name as product_name,
+               COALESCE(SUM(si.quantity), 0)::integer as qty_sold,
+               COALESCE(SUM(si.total_price), 0)::numeric(12,2) as sales_value,
+               COALESCE(SUM(si.quantity * si.unit_cost), 0)::numeric(12,2) as cogs
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        JOIN products p ON p.id = si.product_id
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+        GROUP BY p.name
+        ORDER BY sales_value DESC
+      `);
+      const [totals] = await rawSql.unsafe(`
+        SELECT COUNT(s.id)::integer as txn_count,
+               COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as total_revenue,
+               COALESCE(SUM(s.discount), 0)::numeric(12,2) as total_discount
+        FROM sales s
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+      `);
+      const payments2 = await rawSql.unsafe(`
+        SELECT pmt.payment_method, COALESCE(SUM(pmt.amount), 0)::numeric(12,2) as amount
+        FROM payments pmt
+        JOIN sales s ON s.id = pmt.sale_id
+        WHERE s.shift_id = '${activeShift.id}' AND s.status = 'COMPLETED'
+        GROUP BY pmt.payment_method
+      `);
+      const totalRevenue = parseFloat(totals?.total_revenue || "0");
+      const totalDiscount = parseFloat(totals?.total_discount || "0");
+      const totalCogs = productRows.reduce((sum, r) => sum + parseFloat(r.cogs || "0"), 0);
+      const grossProfit = totalRevenue - totalCogs;
+      const momoSales = payments2.filter((p) => /MOMO|TELECEL|AIRTELTIGO/i.test(String(p.payment_method))).reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+      const cashVarianceText = Math.abs(discrepancy) < 0.01 ? "Cash drawer balanced." : discrepancy < 0 ? "Cash Shortage: GH\u20B5${Math.abs(discrepancy).toFixed(2)}" : "Cash Excess: GH\u20B5${discrepancy.toFixed(2)}";
+      const report = [
+        "EMPRESS ORIS POS - SHIFT CLOSED",
+        "",
+        "Cashier: " + cashierName,
+        "Date: " + (/* @__PURE__ */ new Date()).toLocaleDateString("en-GB"),
+        "",
+        "SALES:",
+        "Total Sales: GH\u20B5" + totalRevenue.toFixed(2),
+        "Cash Sales: GH\u20B5" + cashSales.toFixed(2),
+        "MoMo Sales: GH\u20B5" + momoSales.toFixed(2),
+        "",
+        "FINANCIAL SUMMARY:",
+        "COGS: GH\u20B5" + totalCogs.toFixed(2),
+        "Gross Profit: GH\u20B5" + grossProfit.toFixed(2),
+        "",
+        "CASH RECONCILIATION:",
+        "Opening Cash: GH\u20B5" + openingCash.toFixed(2),
+        "Expected Cash: GH\u20B5" + expectedCash.toFixed(2),
+        "Actual Cash: GH\u20B5" + actualCashNum.toFixed(2),
+        cashVarianceText
+      ].join("\n");
+      const refId = `shift-sms-${activeShift.id}`;
+      const [existing] = await rawSql.unsafe(`SELECT id FROM sms_outbox WHERE reference_id = '${refId}' LIMIT 1`);
+      if (!existing) {
+        const [outboxRow] = await rawSql.unsafe(`
+          INSERT INTO sms_outbox (event_type, recipient, message, status, reference_id)
+          VALUES ('SHIFT_CLOSED', ${recipient ? `'${recipient}'` : "NULL"}, '${report.replace(/'/g, "''")}', 'PENDING', '${refId}')
+          RETURNING id
+        `);
+        if (outboxRow?.id) {
+          (async () => {
+            try {
+              if (!settings?.sms_notifications_enabled) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SKIPPED', last_error = 'SMS disabled by owner' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              if (!recipient) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', last_error = 'No recipient phone configured' WHERE id = '${outboxRow.id}'`);
+                return;
+              }
+              const { sendSms: sendSms2 } = await Promise.resolve().then(() => (init_sasuSync(), sasuSync_exports));
+              const result = await sendSms2(recipient, report, `shift:${activeShift.id}:closed`);
+              if (result.success) {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW() WHERE id = '${outboxRow.id}'`);
+              } else {
+                await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+              }
+            } catch (e) {
+              await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(e?.message || "Unknown error").replace(/'/g, "''")}' WHERE id = '${outboxRow.id}'`);
+            }
+          })();
+        }
+      }
+    } catch (smsErr) {
+      console.error("[Shift SMS] Failed to queue SMS:", smsErr);
+    }
     await broadcastRealtimeEvent("SHIFT_UPDATED", { cashierId: activeShift.cashier_id, status: "CLOSED" });
     return res.json({
       success: true,
@@ -2414,7 +4642,7 @@ shiftsRouter.get("/history", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   try {
-    const isOwner = req.user?.role === "OWNER";
+    const isOwner = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
     const userFilter = isOwner ? "" : `WHERE s.cashier_id = '${req.user?.id}'`;
     const query = `
       SELECT 
@@ -2439,20 +4667,20 @@ shiftsRouter.get("/history", requireAuthentication, async (req, res) => {
 });
 
 // src/server/routes/suppliers.ts
-import { Router as Router7 } from "express";
-import { desc as desc2 } from "drizzle-orm";
-var suppliersRouter = Router7();
+import { Router as Router8 } from "express";
+import { eq as eq5, desc as desc3 } from "drizzle-orm";
+var suppliersRouter = Router8();
 suppliersRouter.get("/", requireAuthentication, async (req, res) => {
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });
   try {
-    const list = await db.select().from(schema_exports.suppliers).orderBy(desc2(schema_exports.suppliers.createdAt));
+    const list = await db.select().from(schema_exports.suppliers).orderBy(desc3(schema_exports.suppliers.createdAt));
     return res.json({ suppliers: list });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Failed to fetch suppliers" });
   }
 });
-suppliersRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+suppliersRouter.post("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });
   const { name, contactPerson, phone, email, address, city, region, paymentTerms, notes } = req.body;
@@ -2480,16 +4708,46 @@ suppliersRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
       details: { name: supplier.name },
       ipAddress: req.ip
     });
+    await broadcastRealtimeEvent("SUPPLIER_CREATED", { supplierId: supplier.id, createdBy: req.user?.id });
     return res.status(201).json({ success: true, supplier });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Failed to create supplier" });
   }
 });
+suppliersRouter.delete("/:id", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "Database not connected." });
+  const { id } = req.params;
+  try {
+    const [existing] = await db.select().from(schema_exports.suppliers).where(eq5(schema_exports.suppliers.id, id)).limit(1);
+    if (!existing) {
+      return res.status(404).json({ error: "Supplier not found." });
+    }
+    const purchases2 = await db.select({ id: schema_exports.purchases.id }).from(schema_exports.purchases).where(eq5(schema_exports.purchases.supplierId, id)).limit(1);
+    if (purchases2.length > 0) {
+      return res.status(400).json({ error: "Cannot delete supplier with existing purchase orders. Remove related purchases first." });
+    }
+    await db.delete(schema_exports.suppliers).where(eq5(schema_exports.suppliers.id, id));
+    await db.insert(schema_exports.auditLogs).values({
+      userId: req.user?.id,
+      action: "SUPPLIER_DELETED",
+      entityType: "SUPPLIER",
+      entityId: id,
+      details: { name: existing.name },
+      ipAddress: req.ip
+    });
+    await broadcastRealtimeEvent("SUPPLIER_DELETED", { supplierId: id, deletedBy: req.user?.id });
+    return res.json({ success: true, supplier: existing });
+  } catch (err) {
+    console.error("[Delete Supplier] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to delete supplier" });
+  }
+});
 
 // src/server/routes/categories.ts
-import { Router as Router8 } from "express";
+import { Router as Router9 } from "express";
 import { asc } from "drizzle-orm";
-var categoriesRouter = Router8();
+var categoriesRouter = Router9();
 categoriesRouter.get("/", requireAuthentication, async (req, res) => {
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });
@@ -2514,8 +4772,8 @@ categoriesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async 
 });
 
 // src/server/routes/purchases.ts
-import { Router as Router9 } from "express";
-var purchasesRouter = Router9();
+import { Router as Router10 } from "express";
+var purchasesRouter = Router10();
 purchasesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
@@ -2628,8 +4886,8 @@ purchasesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
 });
 
 // src/server/routes/expenses.ts
-import { Router as Router10 } from "express";
-var expensesRouter = Router10();
+import { Router as Router11 } from "express";
+var expensesRouter = Router11();
 expensesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
@@ -2699,9 +4957,9 @@ expensesRouter.post("/categories", requireAuthentication, requireRole(["OWNER"])
 });
 
 // src/server/routes/employees.ts
-import { Router as Router11 } from "express";
-var employeesRouter = Router11();
-employeesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+import { Router as Router12 } from "express";
+var employeesRouter = Router12();
+employeesRouter.get("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   try {
@@ -2709,18 +4967,19 @@ employeesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (r
       SELECT 
         u.id,
         u.email,
-        u.full_name,
+        u.full_name AS "fullName",
         u.phone,
         u.role,
         u.status,
-        u.created_at,
-        ep.employee_code,
+        u.created_at AS "createdAt",
+        ep.employee_code AS "employeeCode",
         ep.position,
-        ep.hire_date,
+        ep.hire_date AS "hireDate",
         ep.permissions,
-        ep.is_active as profile_active
+        ep.is_active AS "profileActive"
       FROM users u
       LEFT JOIN employee_profiles ep ON u.id = ep.user_id
+      WHERE u.status = 'ACTIVE'
       ORDER BY u.created_at ASC
     `);
     return res.json({ employees });
@@ -2728,7 +4987,7 @@ employeesRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (r
     return res.status(500).json({ error: err.message || "Failed to fetch employees" });
   }
 });
-employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+employeesRouter.post("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   const { email, password, fullName, phone, employeeCode, position } = req.body;
@@ -2736,9 +4995,14 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
     return res.status(400).json({ error: "Email, Full Name, and Employee Code are required." });
   }
   try {
+    const [existing] = await rawSql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+    if (existing) {
+      return res.status(400).json({ error: "An employee with this email already exists." });
+    }
+    let supabaseUserId = null;
     const supabase = getSupabase();
     if (supabase && password) {
-      await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -2748,16 +5012,36 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
           }
         }
       });
+      if (error) {
+        return res.status(400).json({ error: error.message || "Failed to create auth account." });
+      }
+      supabaseUserId = data.user?.id || null;
     }
     const result = await rawSql.begin(async (tx) => {
-      const [user] = await tx`
-        INSERT INTO users (email, full_name, phone, role, status)
-        VALUES (${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
-        RETURNING *
-      `;
+      let user;
+      if (supabaseUserId) {
+        const [existingUser] = await tx`SELECT id FROM users WHERE id = ${supabaseUserId} LIMIT 1`;
+        if (existingUser) {
+          await tx`UPDATE users SET full_name = ${fullName}, phone = ${phone || null}, status = 'ACTIVE', updated_at = NOW() WHERE id = ${supabaseUserId}`;
+          [user] = await tx`SELECT * FROM users WHERE id = ${supabaseUserId}`;
+        } else {
+          [user] = await tx`
+            INSERT INTO users (id, email, full_name, phone, role, status)
+            VALUES (${supabaseUserId}, ${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
+            RETURNING *
+          `;
+        }
+      } else {
+        [user] = await tx`
+          INSERT INTO users (email, full_name, phone, role, status)
+          VALUES (${email}, ${fullName}, ${phone || null}, 'EMPLOYEE', 'ACTIVE')
+          RETURNING *
+        `;
+      }
       const [profile] = await tx`
         INSERT INTO employee_profiles (user_id, employee_code, position, hire_date, is_active)
         VALUES (${user.id}, ${employeeCode}, ${position || "Cashier"}, CURRENT_DATE, true)
+        ON CONFLICT (user_id) DO UPDATE SET employee_code = ${employeeCode}, position = ${position || "Cashier"}, is_active = true
         RETURNING *
       `;
       await tx`
@@ -2775,7 +5059,7 @@ employeesRouter.post("/", requireAuthentication, requireRole(["OWNER"]), async (
     return res.status(400).json({ error: err.message || "Failed to create employee." });
   }
 });
-employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   const { status } = req.body;
@@ -2802,7 +5086,7 @@ employeesRouter.patch("/:id/status", requireAuthentication, requireRole(["OWNER"
     return res.status(500).json({ error: err.message || "Failed to update employee status" });
   }
 });
-employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   const { id } = req.params;
@@ -2813,8 +5097,9 @@ employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER"]), as
     const result = await rawSql.begin(async (tx) => {
       const [targetUser] = await tx`SELECT id, email, full_name, role FROM users WHERE id = ${id}`;
       if (!targetUser) throw new Error("Employee not found.");
-      await tx`DELETE FROM employee_profiles WHERE user_id = ${id}`;
-      await tx`DELETE FROM users WHERE id = ${id}`;
+      await tx`UPDATE cashier_shifts SET status = 'CLOSED', end_time = NOW() WHERE cashier_id = ${id} AND status = 'OPEN'`;
+      await tx`UPDATE users SET status = 'INACTIVE', updated_at = NOW() WHERE id = ${id}`;
+      await tx`UPDATE employee_profiles SET is_active = false WHERE user_id = ${id}`;
       await tx`
         INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
         VALUES (
@@ -2833,9 +5118,9 @@ employeesRouter.delete("/:id", requireAuthentication, requireRole(["OWNER"]), as
 });
 
 // src/server/routes/reports.ts
-import { Router as Router12 } from "express";
-var reportsRouter = Router12();
-reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+import { Router as Router13 } from "express";
+var reportsRouter = Router13();
+reportsRouter.get("/dashboard", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   try {
@@ -2914,7 +5199,7 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), a
     const [shiftsData] = await rawSql.unsafe(`
       SELECT 
         (SELECT COUNT(*)::integer FROM users WHERE role = 'EMPLOYEE' AND status = 'ACTIVE') as active_employees,
-        (SELECT COUNT(*)::integer FROM cashier_shifts WHERE status = 'OPEN') as open_shifts
+        (SELECT COUNT(*)::integer FROM cashier_shifts cs JOIN users u ON cs.cashier_id = u.id WHERE cs.status = 'OPEN' AND u.status = 'ACTIVE') as open_shifts
     `);
     const recentSales = await rawSql.unsafe(`
       SELECT 
@@ -2936,6 +5221,16 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), a
     const grossProfit = Math.max(0, revenue - cogs);
     const expenses2 = parseFloat(expensesData?.total_expenses || "0");
     const netProfit = grossProfit - expenses2;
+    const isOwnerOrAdmin = req.user?.role === "OWNER" || req.user?.role === "ADMIN";
+    const finance = isOwnerOrAdmin ? {
+      revenue: revenue.toFixed(2),
+      costOfGoodsSold: cogs.toFixed(2),
+      grossProfit: grossProfit.toFixed(2),
+      expenses: expenses2.toFixed(2),
+      monthExpenses: expensesData?.month_expenses || "0.00",
+      netProfit: netProfit.toFixed(2),
+      grossMarginPercent: revenue > 0 ? (grossProfit / revenue * 100).toFixed(1) : "0.0"
+    } : { revenue: revenue.toFixed(2) };
     return res.json({
       sales: {
         todaySales: salesMetrics?.today_sales || "0.00",
@@ -2952,28 +5247,20 @@ reportsRouter.get("/dashboard", requireAuthentication, requireRole(["OWNER"]), a
         expiringSoonCount: inventoryMetrics?.expiring_soon_count || 0,
         expiredBatchesCount: inventoryMetrics?.expired_batches_count || 0
       },
-      finance: {
-        revenue: revenue.toFixed(2),
-        costOfGoodsSold: cogs.toFixed(2),
-        grossProfit: grossProfit.toFixed(2),
-        expenses: expenses2.toFixed(2),
-        monthExpenses: expensesData?.month_expenses || "0.00",
-        netProfit: netProfit.toFixed(2),
-        grossMarginPercent: revenue > 0 ? (grossProfit / revenue * 100).toFixed(1) : "0.0"
-      },
+      finance,
       employees: {
         activeCount: shiftsData?.active_employees || 0,
         openShifts: shiftsData?.open_shifts || 0
       },
       recentTransactions: recentSales,
-      lowStockProducts: lowStockProducts || []
+      lowStockProducts: isOwnerOrAdmin ? lowStockProducts || [] : []
     });
   } catch (err) {
     console.error("[Dashboard Reports] Error:", err);
     return res.status(500).json({ error: err.message || "Failed to generate dashboard reports" });
   }
 });
-reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   const { startDate, endDate } = req.query;
@@ -2995,8 +5282,8 @@ reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER"]), async
         p.id,
         p.name,
         p.sku,
-        COALESCE(SUM(si.quantity), 0)::integer as units_sold,
-        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_revenue,
+        COALESCE(SUM(si.quantity), 0)::integer as total_qty,
+        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_sales,
         COALESCE(SUM(si.total_cost), 0)::numeric(12,2) as total_cost,
         (COALESCE(SUM(si.total_price), 0) - COALESCE(SUM(si.total_cost), 0))::numeric(12,2) as gross_profit
       FROM sale_items si
@@ -3004,7 +5291,7 @@ reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER"]), async
       JOIN sales s ON si.sale_id = s.id
       WHERE s.status = 'COMPLETED' ${dateFilter}
       GROUP BY p.id, p.name, p.sku
-      ORDER BY units_sold DESC
+      ORDER BY total_qty DESC
       LIMIT 20
     `);
     return res.json({ paymentBreakdown, topProducts });
@@ -3012,14 +5299,63 @@ reportsRouter.get("/sales", requireAuthentication, requireRole(["OWNER"]), async
     return res.status(500).json({ error: err.message || "Failed to fetch sales report" });
   }
 });
+reportsRouter.get("/sales-summary", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+  const { startDate, endDate } = req.query;
+  try {
+    const dateFilter = startDate && endDate ? `AND s.created_at >= '${startDate}'::timestamptz AND s.created_at <= '${endDate} 23:59:59'::timestamptz` : "";
+    const [totals] = await rawSql.unsafe(`
+      SELECT 
+        COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as revenue,
+        COALESCE(SUM(s.total_cost), 0)::numeric(12,2) as cogs,
+        (COALESCE(SUM(s.total_amount), 0) - COALESCE(SUM(s.total_cost), 0))::numeric(12,2) as gross_profit,
+        COUNT(s.id)::integer as total_transactions
+      FROM sales s
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+    `);
+    const paymentMethods = await rawSql.unsafe(`
+      SELECT 
+        COALESCE(p.payment_method, 'CASH') as payment_method,
+        COUNT(s.id)::integer as count,
+        COALESCE(SUM(s.total_amount), 0)::numeric(12,2) as total
+      FROM sales s
+      JOIN payments p ON s.id = p.sale_id
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+      GROUP BY p.payment_method
+      ORDER BY total DESC
+    `);
+    const topProducts = await rawSql.unsafe(`
+      SELECT 
+        p.id,
+        p.name,
+        p.sku,
+        COALESCE(SUM(si.quantity), 0)::integer as total_qty,
+        COALESCE(SUM(si.total_price), 0)::numeric(12,2) as total_sales,
+        COALESCE(SUM(si.total_cost), 0)::numeric(12,2) as total_cost,
+        (COALESCE(SUM(si.total_price), 0) - COALESCE(SUM(si.total_cost), 0))::numeric(12,2) as gross_profit
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      JOIN sales s ON si.sale_id = s.id
+      WHERE s.status = 'COMPLETED' ${dateFilter}
+      GROUP BY p.id, p.name, p.sku
+      ORDER BY total_qty DESC
+      LIMIT 20
+    `);
+    return res.json({ totals, paymentMethods, topProducts });
+  } catch (err) {
+    console.error("[Sales Summary] Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to generate sales summary" });
+  }
+});
 
 // src/server/routes/settings.ts
-import { Router as Router13 } from "express";
-import multer2 from "multer";
-import { eq as eq5, isNotNull } from "drizzle-orm";
-var settingsRouter = Router13();
-var upload2 = multer2({
-  storage: multer2.memoryStorage(),
+import { Router as Router14 } from "express";
+import multer3 from "multer";
+import { eq as eq6, isNotNull } from "drizzle-orm";
+var settingsRouter = Router14();
+var upload2 = multer3({
+  storage: multer3.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
@@ -3052,7 +5388,7 @@ settingsRouter.get("/", async (req, res) => {
 settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });
-  const { name, licenseNumber, phone, email, address, city, region, currency, currencySymbol, taxRate, receiptFooter, logoUrl } = req.body;
+  const { name, licenseNumber, phone, email, address, city, region, currency, currencySymbol, taxRate, receiptFooter, logoUrl, smsNotificationsEnabled, smsRecipientPhone } = req.body;
   try {
     const existing = await db.select().from(schema_exports.pharmacySettings).limit(1);
     let updated;
@@ -3070,7 +5406,9 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
         currencySymbol: currencySymbol || "GH\u20B5",
         taxRate: taxRate ? parseFloat(taxRate).toFixed(2) : "0.00",
         receiptFooter,
-        logoUrl
+        logoUrl,
+        smsNotificationsEnabled: smsNotificationsEnabled !== void 0 ? !!smsNotificationsEnabled : false,
+        smsRecipientPhone: smsRecipientPhone !== void 0 ? smsRecipientPhone : null
       }).returning();
     } else {
       [updated] = await db.update(schema_exports.pharmacySettings).set({
@@ -3086,8 +5424,10 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
         taxRate: taxRate !== void 0 ? parseFloat(taxRate).toFixed(2) : existing[0].taxRate,
         receiptFooter,
         logoUrl: logoUrl !== void 0 ? logoUrl : existing[0].logoUrl,
+        smsNotificationsEnabled: smsNotificationsEnabled !== void 0 ? !!smsNotificationsEnabled : existing[0].smsNotificationsEnabled,
+        smsRecipientPhone: smsRecipientPhone !== void 0 ? smsRecipientPhone : existing[0].smsRecipientPhone,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq5(schema_exports.pharmacySettings.id, existing[0].id)).returning();
+      }).where(eq6(schema_exports.pharmacySettings.id, existing[0].id)).returning();
     }
     await db.insert(schema_exports.auditLogs).values({
       userId: req.user?.id,
@@ -3103,6 +5443,47 @@ settingsRouter.put("/", requireAuthentication, requireRole(["OWNER"]), async (re
     return res.status(500).json({ error: err.message || "Failed to update pharmacy settings" });
   }
 });
+settingsRouter.get(
+  "/sms-history",
+  requireAuthentication,
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    try {
+      const rows = await rawSql.unsafe(`SELECT * FROM sms_outbox ORDER BY created_at DESC LIMIT 100`);
+      return res.json({ history: rows });
+    } catch (err) {
+      return res.status(500).json({ error: err.message || "Failed to fetch SMS history" });
+    }
+  }
+);
+settingsRouter.post(
+  "/sms-retry/:id",
+  requireAuthentication,
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    const { id } = req.params;
+    try {
+      const [row] = await rawSql.unsafe(`SELECT * FROM sms_outbox WHERE id = '${id}' LIMIT 1`);
+      if (!row) return res.status(404).json({ error: "SMS record not found." });
+      if (row.status === "SENT") return res.json({ success: true, message: "Already sent." });
+      const { sendSms: sendSms2 } = await Promise.resolve().then(() => (init_sasuSync(), sasuSync_exports));
+      const result = await sendSms2(row.recipient, row.message);
+      if (result.success) {
+        await rawSql.unsafe(`UPDATE sms_outbox SET status = 'SENT', attempts = attempts + 1, sent_at = NOW(), last_error = NULL WHERE id = '${id}'`);
+        return res.json({ success: true });
+      } else {
+        await rawSql.unsafe(`UPDATE sms_outbox SET status = 'FAILED', attempts = attempts + 1, last_error = '${(result.error || "Unknown").replace(/'/g, "''")}' WHERE id = '${id}'`);
+        return res.status(502).json({ success: false, error: result.error });
+      }
+    } catch (err) {
+      return res.status(500).json({ error: err.message || "Retry failed" });
+    }
+  }
+);
 settingsRouter.post(
   "/logo",
   requireAuthentication,
@@ -3135,53 +5516,91 @@ settingsRouter.post(
 );
 
 // src/server/routes/notifications.ts
-import { Router as Router14 } from "express";
-var notificationsRouter = Router14();
+import { Router as Router15 } from "express";
+var notificationsRouter = Router15();
 notificationsRouter.get("/", requireAuthentication, async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   try {
-    const lowStockItems = await rawSql.unsafe(`
-      SELECT p.id, p.name, p.sku, p.reorder_level,
-        COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as current_stock
-      FROM products p
-      LEFT JOIN batches b ON p.id = b.product_id
-      WHERE p.is_active = true
-      GROUP BY p.id, p.name, p.sku, p.reorder_level
-      HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
-      ORDER BY current_stock ASC
-      LIMIT 10
+    try {
+      const lowStockItems = await rawSql.unsafe(`
+        SELECT p.id, p.name, p.sku, p.reorder_level,
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as current_stock
+        FROM products p
+        LEFT JOIN batches b ON p.id = b.product_id
+        WHERE p.is_active = true
+        GROUP BY p.id, p.name, p.sku, p.reorder_level
+        HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
+        ORDER BY current_stock ASC
+        LIMIT 100
+      `);
+      for (const item of lowStockItems) {
+        const refId = `low-${item.id}`;
+        const title = item.current_stock === 0 ? `${item.name} is Out of Stock` : `${item.name} is Low on Stock`;
+        const message = `Current stock: ${item.current_stock} units (reorder at ${item.reorder_level}). SKU: ${item.sku}`;
+        const type = item.current_stock === 0 ? "OUT_OF_STOCK" : "LOW_STOCK";
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, $$${type}$$, $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Low stock upsert error:", err);
+    }
+    try {
+      const expiringBatches = await rawSql.unsafe(`
+        SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name,
+          (b.expiry_date - CURRENT_DATE)::integer as days_remaining
+        FROM batches b
+        JOIN products p ON b.product_id = p.id
+        WHERE b.current_quantity > 0 
+          AND b.expiry_date >= CURRENT_DATE 
+          AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
+        ORDER BY b.expiry_date ASC
+        LIMIT 100
+      `);
+      for (const item of expiringBatches) {
+        const refId = `exp-${item.id}`;
+        const title = `${item.product_name} \u2014 Batch ${item.batch_number} Expiring`;
+        const message = `Expires in ${item.days_remaining} days (${new Date(item.expiry_date).toLocaleDateString("en-GB")}). Qty: ${item.current_quantity}`;
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, 'EXPIRING_SOON', $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Expiring batch upsert error:", err);
+    }
+    try {
+      const expiredBatches = await rawSql.unsafe(`
+        SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name
+        FROM batches b
+        JOIN products p ON b.product_id = p.id
+        WHERE b.current_quantity > 0 AND b.expiry_date < CURRENT_DATE
+        ORDER BY b.expiry_date DESC
+        LIMIT 100
+      `);
+      for (const item of expiredBatches) {
+        const refId = `expired-${item.id}`;
+        const title = `${item.product_name} \u2014 Batch ${item.batch_number} Expired`;
+        const message = `Expired on ${new Date(item.expiry_date).toLocaleDateString("en-GB")}. Qty: ${item.current_quantity} units still in stock.`;
+        await rawSql.unsafe(`
+          INSERT INTO notifications (title, message, type, reference_id, is_read)
+          VALUES ($$${title}$$, $$${message}$$, 'EXPIRED', $$${refId}$$, false)
+          ON CONFLICT (reference_id) DO UPDATE SET title = $$${title}$$, message = $$${message}$$, is_read = notifications.is_read
+        `);
+      }
+    } catch (err) {
+      console.warn("[Notifications] Expired batch upsert error:", err);
+    }
+    const allNotifications = await rawSql.unsafe(`
+      SELECT * FROM notifications ORDER BY is_read ASC, created_at DESC LIMIT 200
     `);
-    const expiringBatches = await rawSql.unsafe(`
-      SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name,
-        (b.expiry_date - CURRENT_DATE)::integer as days_remaining
-      FROM batches b
-      JOIN products p ON b.product_id = p.id
-      WHERE b.current_quantity > 0 
-        AND b.expiry_date >= CURRENT_DATE 
-        AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
-      ORDER BY b.expiry_date ASC
-      LIMIT 10
-    `);
-    const expiredBatches = await rawSql.unsafe(`
-      SELECT b.id, b.batch_number, b.current_quantity, b.expiry_date, p.name as product_name
-      FROM batches b
-      JOIN products p ON b.product_id = p.id
-      WHERE b.current_quantity > 0 AND b.expiry_date < CURRENT_DATE
-      ORDER BY b.expiry_date DESC
-      LIMIT 10
-    `);
-    const storedNotifications = await rawSql.unsafe(`
-      SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20
-    `);
-    return res.json({
-      lowStock: lowStockItems,
-      expiringSoon: expiringBatches,
-      expired: expiredBatches,
-      stored: storedNotifications,
-      totalAlerts: lowStockItems.length + expiringBatches.length + expiredBatches.length
-    });
+    return res.json({ notifications: allNotifications });
   } catch (err) {
+    console.error("[Notifications] Error:", err);
     return res.status(500).json({ error: err.message || "Failed to fetch notifications" });
   }
 });
@@ -3189,45 +5608,47 @@ notificationsRouter.get("/unread-count", requireAuthentication, async (req, res)
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ count: 0 });
   try {
-    const [counts] = await rawSql.unsafe(`
-      SELECT 
-        (
-          SELECT COUNT(*)::integer FROM (
-            SELECT p.id
-            FROM products p
-            LEFT JOIN batches b ON p.id = b.product_id
-            WHERE p.is_active = true
-            GROUP BY p.id, p.reorder_level
-            HAVING COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0) <= p.reorder_level
-          ) ls
-        ) as low_stock_count,
-        (
-          SELECT COUNT(DISTINCT b.id)::integer
-          FROM batches b
-          WHERE b.current_quantity > 0 
-            AND b.expiry_date >= CURRENT_DATE 
-            AND b.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
-        ) as expiring_soon_count,
-        (
-          SELECT COUNT(*)::integer FROM notifications WHERE is_read = false
-        ) as stored_unread_count
+    const [result] = await rawSql.unsafe(`
+      SELECT COUNT(*)::integer as count FROM notifications WHERE is_read = false
     `);
-    const total = (counts?.low_stock_count || 0) + (counts?.expiring_soon_count || 0) + (counts?.stored_unread_count || 0);
-    return res.json({
-      count: total,
-      lowStockCount: counts?.low_stock_count || 0,
-      expiringSoonCount: counts?.expiring_soon_count || 0,
-      storedUnreadCount: counts?.stored_unread_count || 0
-    });
+    return res.json({ count: result?.count || 0 });
   } catch (err) {
     return res.json({ count: 0 });
   }
 });
+notificationsRouter.put("/:id/read", requireAuthentication, async (req, res) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+  const { id } = req.params;
+  try {
+    const [updated] = await rawSql`
+      UPDATE notifications SET is_read = true WHERE id = ${id} RETURNING *
+    `;
+    if (!updated) {
+      return res.status(404).json({ error: "Notification not found." });
+    }
+    await broadcastRealtimeEvent("NOTIFICATION_UPDATED", { notificationId: id });
+    return res.json({ success: true, notification: updated });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to mark notification as read" });
+  }
+});
+notificationsRouter.put("/read-all", requireAuthentication, async (req, res) => {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+  try {
+    await rawSql`UPDATE notifications SET is_read = true WHERE is_read = false`;
+    await broadcastRealtimeEvent("NOTIFICATION_UPDATED", { action: "read_all" });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to mark all as read" });
+  }
+});
 
 // src/server/routes/audit.ts
-import { Router as Router15 } from "express";
-var auditRouter = Router15();
-auditRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+import { Router as Router16 } from "express";
+var auditRouter = Router16();
+auditRouter.get("/", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
   const rawSql = getRawSql();
   if (!rawSql) return res.status(503).json({ error: "Database not connected." });
   const { action, limit = 100 } = req.query;
@@ -3251,10 +5672,168 @@ auditRouter.get("/", requireAuthentication, requireRole(["OWNER"]), async (req, 
   }
 });
 
+// src/server/routes/salesTrend.ts
+import { Router as Router17 } from "express";
+var salesTrendRouter = Router17();
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function hour12(h) {
+  const r = h % 12;
+  return r === 0 ? 12 : r;
+}
+function ampm(h) {
+  return h >= 12 ? "PM" : "AM";
+}
+function formatHourLabel(h) {
+  return `${pad2(h)}:00`;
+}
+function monthShort(y, m) {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", {
+    month: "short",
+    timeZone: "Africa/Accra"
+  });
+}
+function monthLong(y, m) {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", {
+    month: "long",
+    timeZone: "Africa/Accra"
+  });
+}
+salesTrendRouter.get(
+  "/",
+  requireAuthentication,
+  requireRole(["OWNER"]),
+  async (req, res) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    const period = String(req.query.period || "day");
+    const dateParam = req.query.date ? String(req.query.date) : null;
+    try {
+      const now = /* @__PURE__ */ new Date();
+      const ghanaDate = now.toLocaleDateString("en-CA", { timeZone: "Africa/Accra" });
+      const ghanaYear = parseInt(
+        now.toLocaleString("en-US", { timeZone: "Africa/Accra", year: "numeric" })
+      );
+      const ghanaMonth = parseInt(
+        now.toLocaleString("en-US", { timeZone: "Africa/Accra", month: "2-digit" })
+      );
+      const ghanaDay = parseInt(
+        now.toLocaleString("en-US", { timeZone: "Africa/Accra", day: "2-digit" })
+      );
+      const ghanaHour = parseInt(
+        now.toLocaleString("en-US", { timeZone: "Africa/Accra", hour: "2-digit", hour12: false })
+      );
+      if (period === "day") {
+        const d = dateParam || ghanaDate;
+        const isFuture = d > ghanaDate;
+        const isToday = d === ghanaDate;
+        const buckets = [];
+        if (!isFuture) {
+          const endHour = isToday ? ghanaHour : 23;
+          const rows = await rawSql`
+            SELECT EXTRACT(HOUR FROM (created_at AT TIME ZONE 'Africa/Accra'))::int AS hour,
+                   COALESCE(SUM(total_amount), 0)::numeric(12,2) AS amount
+            FROM sales
+            WHERE status = 'COMPLETED'
+              AND (created_at AT TIME ZONE 'Africa/Accra')::date = ${d}::date
+            GROUP BY hour
+          `;
+          const map = new Map(
+            rows.map((r) => [Number(r.hour), Number(r.amount)])
+          );
+          for (let h = 0; h <= endHour; h++) {
+            const next = h === 23 ? 0 : h + 1;
+            const nextDay = h === 23;
+            const nextAmpm = nextDay ? "AM" : ampm(next);
+            const nextHour = nextDay ? 12 : hour12(next);
+            buckets.push({
+              label: formatHourLabel(h),
+              period: `${hour12(h)}:00 ${ampm(h)} \u2013 ${nextHour}:00 ${nextAmpm}`,
+              value: map.get(h) || 0
+            });
+          }
+        }
+        return res.json({ period, date: d, buckets });
+      }
+      if (period === "month") {
+        const d = dateParam || `${ghanaYear}-${pad2(ghanaMonth)}`;
+        const [yStr, mStr] = d.split("-");
+        const y = parseInt(yStr);
+        const m = parseInt(mStr);
+        const isFuture = y > ghanaYear || y === ghanaYear && m > ghanaMonth;
+        const isCurrent = y === ghanaYear && m === ghanaMonth;
+        const buckets = [];
+        if (!isFuture) {
+          const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+          const maxDay = isCurrent ? ghanaDay : lastDay;
+          const rows = await rawSql`
+            SELECT EXTRACT(DAY FROM (created_at AT TIME ZONE 'Africa/Accra'))::int AS day,
+                   COALESCE(SUM(total_amount), 0)::numeric(12,2) AS amount
+            FROM sales
+            WHERE status = 'COMPLETED'
+              AND EXTRACT(YEAR FROM (created_at AT TIME ZONE 'Africa/Accra')) = ${y}
+              AND EXTRACT(MONTH FROM (created_at AT TIME ZONE 'Africa/Accra')) = ${m}
+            GROUP BY day
+          `;
+          const map = new Map(
+            rows.map((r) => [Number(r.day), Number(r.amount)])
+          );
+          for (let day = 1; day <= maxDay; day++) {
+            const dateStr = new Date(Date.UTC(y, m - 1, day)).toLocaleDateString(
+              "en-GB",
+              { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Accra" }
+            );
+            buckets.push({
+              label: String(day),
+              period: dateStr,
+              value: map.get(day) || 0
+            });
+          }
+        }
+        return res.json({ period, date: d, buckets });
+      }
+      if (period === "year") {
+        const y = parseInt(dateParam || String(ghanaYear));
+        const isFuture = y > ghanaYear;
+        const isCurrent = y === ghanaYear;
+        const buckets = [];
+        if (!isFuture) {
+          const maxMonth = isCurrent ? ghanaMonth : 12;
+          const rows = await rawSql`
+            SELECT EXTRACT(MONTH FROM (created_at AT TIME ZONE 'Africa/Accra'))::int AS month,
+                   COALESCE(SUM(total_amount), 0)::numeric(12,2) AS amount
+            FROM sales
+            WHERE status = 'COMPLETED'
+              AND EXTRACT(YEAR FROM (created_at AT TIME ZONE 'Africa/Accra')) = ${y}
+            GROUP BY month
+          `;
+          const map = new Map(
+            rows.map((r) => [Number(r.month), Number(r.amount)])
+          );
+          for (let mth = 1; mth <= maxMonth; mth++) {
+            buckets.push({
+              label: monthShort(y, mth),
+              period: `${monthLong(y, mth)} ${y}`,
+              value: map.get(mth) || 0
+            });
+          }
+        }
+        return res.json({ period, date: String(y), buckets });
+      }
+      return res.status(400).json({ error: "Invalid period. Use day, month, or year." });
+    } catch (err) {
+      console.error("[Sales Trend] Error:", err);
+      return res.status(500).json({ error: err.message || "Failed to fetch sales trend" });
+    }
+  }
+);
+
 // src/server/app.ts
 function createExpressApp() {
   const app2 = express();
   app2.use(cors());
+  app2.use(gzipCompression());
   app2.use(express.json({ limit: "10mb" }));
   app2.use(express.urlencoded({ extended: true, limit: "10mb" }));
   app2.get("/api/health", async (req, res) => {
@@ -3270,6 +5849,7 @@ function createExpressApp() {
     });
   });
   app2.use("/api/auth", authRouter);
+  app2.use("/api/products/import", importRouter);
   app2.use("/api/products", productsRouter);
   app2.use("/api/stock", stockRouter);
   app2.use("/api/pos", posRouter);
@@ -3284,6 +5864,20 @@ function createExpressApp() {
   app2.use("/api/settings", settingsRouter);
   app2.use("/api/notifications", notificationsRouter);
   app2.use("/api/audit", auditRouter);
+  app2.use("/api/sales-trend", salesTrendRouter);
+  app2.use((err, req, res, next) => {
+    if (err instanceof multer4.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "File is too large. Maximum size is 5MB." });
+      }
+      return res.status(400).json({ error: err.message || "File upload error." });
+    }
+    if (err.message && err.message.includes("Only JPEG")) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("[App] Unhandled error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  });
   return app2;
 }
 

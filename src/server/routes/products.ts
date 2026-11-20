@@ -478,3 +478,52 @@ productsRouter.put(
     }
   }
 );
+
+
+// Update product price (Owner/Admin) - works even if a price is already listed
+async function updateProductPrice(req: Request, res: Response) {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "Database not connected." });
+
+  const { sellingPrice, wholesalePrice } = req.body || {};
+
+  try {
+    const updateData: Record<string, any> = { updatedAt: new Date() };
+    if (sellingPrice !== undefined) {
+      updateData.sellingPrice = sellingPrice === null || sellingPrice === "" ? "0.00" : parseFloat(sellingPrice).toFixed(2);
+    }
+    if (wholesalePrice !== undefined) {
+      updateData.wholesalePrice = wholesalePrice === null || wholesalePrice === "" ? null : parseFloat(wholesalePrice).toFixed(2);
+    }
+
+    const [updated] = await db
+      .update(schema.products)
+      .set(updateData)
+      .where(eq(schema.products.id, req.params.id))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+
+    await db.insert(schema.auditLogs).values({
+      userId: req.user?.id,
+      action: "PRODUCT_PRICE_UPDATED",
+      entityType: "PRODUCT",
+      entityId: updated.id,
+      details: { sellingPrice: updated.sellingPrice, wholesalePrice: updated.wholesalePrice },
+      ipAddress: req.ip,
+    });
+
+    await broadcastRealtimeEvent("PRODUCT_UPDATED", { product: updated });
+
+    return res.json({ success: true, product: updated });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to update product price." });
+  }
+}
+
+productsRouter.put("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.patch("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.post("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+productsRouter.put("/:id/update-price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);

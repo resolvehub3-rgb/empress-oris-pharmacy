@@ -71,6 +71,14 @@ export function AddStockModal({
   }, [isOpen, localProducts.length]);
 
   const currentProduct = localProducts.find((p) => p.id === productId) || activeProduct;
+  const selectedBatch = (currentProduct?.batches?.find((b: any) => b.id === existingBatchId) || null) as any;
+
+  useEffect(() => {
+    if (mode === "EXISTING_BATCH" && selectedBatch) {
+      setCostPrice(String(selectedBatch.costPrice ?? selectedBatch.cost_price ?? ""));
+      setSellingPrice(String(selectedBatch.sellingPrice ?? selectedBatch.selling_price ?? ""));
+    }
+  }, [existingBatchId, mode, selectedBatch]);
 
   const handleGenerateBatch = () => {
     const year = new Date().getFullYear();
@@ -203,7 +211,7 @@ export function AddStockModal({
                 <span className="text-slate-500 ml-2">SKU: {currentProduct.sku}</span>
               </div>
               <div className="font-semibold text-teal-700">
-                Current Stock: {currentProduct.totalStock} units
+                Current Stock: {currentProduct.totalStock ?? (currentProduct as any).total_stock ?? 0} units
               </div>
             </div>
           )}
@@ -236,6 +244,36 @@ export function AddStockModal({
           {currentProduct && currentProduct.barcode && (
             <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900">
               Barcode already assigned: <span className="font-mono font-bold">{currentProduct.barcode}</span>. No scan required.
+            </div>
+          )}
+
+          {currentProduct?.batches && currentProduct.batches.length > 0 && (
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+              <p className="font-bold text-slate-800">Available current stock & batch details for {currentProduct.name}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="text-[10px] text-slate-500 uppercase font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="py-1 pr-2">Batch No.</th>
+                      <th className="py-1 pr-2">Qty</th>
+                      <th className="py-1 pr-2">Cost Price</th>
+                      <th className="py-1 pr-2">Selling Price</th>
+                      <th className="py-1">Expiry</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {currentProduct.batches.map((b: any) => (
+                      <tr key={b.id}>
+                        <td className="py-1 pr-2 font-mono font-bold">{b.batchNumber || b.batch_number}</td>
+                        <td className="py-1 pr-2">{b.currentQuantity ?? b.current_quantity}</td>
+                        <td className="py-1 pr-2">GH₵ {parseFloat(b.costPrice ?? b.cost_price ?? 0).toFixed(2)}</td>
+                        <td className="py-1 pr-2">GH₵ {parseFloat(b.sellingPrice ?? b.selling_price ?? 0).toFixed(2)}</td>
+                        <td className="py-1">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString("en-GB") : b.expiry_date ? new Date(b.expiry_date).toLocaleDateString("en-GB") : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -274,9 +312,9 @@ export function AddStockModal({
                 className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:outline-none"
               >
                 <option value="">-- Choose Existing Batch --</option>
-                {currentProduct?.batches?.map((b) => (
+                {currentProduct?.batches?.map((b: any) => (
                   <option key={b.id} value={b.id}>
-                    Batch {b.batchNumber} (Expires: {b.expiryDate}) — Current: {b.currentQuantity} units
+                    Batch {b.batchNumber || b.batch_number} (Expires: {b.expiryDate || b.expiry_date}) — Current: {b.currentQuantity ?? b.current_quantity} units
                   </option>
                 ))}
               </select>

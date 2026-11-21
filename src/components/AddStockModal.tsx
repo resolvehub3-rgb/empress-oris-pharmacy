@@ -74,9 +74,20 @@ export function AddStockModal({
   const selectedBatch = (currentProduct?.batches?.find((b: any) => b.id === existingBatchId) || null) as any;
 
   useEffect(() => {
+    if (currentProduct) {
+      const stock = currentProduct.totalStock ?? (currentProduct as any).total_stock ?? 0;
+      if (stock > 0 && !quantity) {
+        setQuantity(String(stock));
+      }
+    }
+  }, [productId]);
+
+  useEffect(() => {
     if (mode === "EXISTING_BATCH" && selectedBatch) {
       setCostPrice(String(selectedBatch.costPrice ?? selectedBatch.cost_price ?? ""));
       setSellingPrice(String(selectedBatch.sellingPrice ?? selectedBatch.selling_price ?? ""));
+      const bq = selectedBatch.currentQuantity ?? selectedBatch.current_quantity ?? 0;
+      if (bq > 0 && !quantity) setQuantity(String(bq));
     }
   }, [existingBatchId, mode, selectedBatch]);
 

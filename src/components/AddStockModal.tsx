@@ -213,6 +213,9 @@ export function AddStockModal({
               <div className="font-semibold text-teal-700">
                 Current Stock: {currentProduct.totalStock ?? (currentProduct as any).total_stock ?? 0} units
               </div>
+              <div className="font-semibold text-emerald-700">
+                Quantity Received: {quantity ? parseInt(quantity) : 0} units → New Stock: {(currentProduct.totalStock ?? (currentProduct as any).total_stock ?? 0) + (quantity ? parseInt(quantity) : 0)} units
+              </div>
             </div>
           )}
 

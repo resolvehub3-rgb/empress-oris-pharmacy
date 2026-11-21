@@ -249,17 +249,21 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
 
     // --- Cross-field inventory rules (mirror the Add Product workflow) --
     const batchNumber = toText(raw.batchNumber);
-    // Opening stock can only be initialized when batch/expiry data is present.
-    // Rows with a quantity but missing batch/expiry are imported as products only
-    // (no stock is fabricated) and the quantity is preserved for later review.
-    const hasStock = initialQuantity > 0 && !!batchNumber && !!expiryDate;
-    if (initialQuantity > 0 && (!batchNumber || !expiryDate)) {
-      warnings.push(
-        "Opening quantity recorded but stock not initialized because Batch Number/Expiry Date is missing. Product will be imported without stock; add stock later via Add Stock."
-      );
-    }
+    // Batch Number / Expiry Date are no longer mandatory: when an opening
+    // quantity is supplied without them we fabricate a default batch so the
+    // stock still shows up in the catalog (quick-upload convenience).
+    let resolvedBatchNumber = batchNumber;
+    let resolvedExpiryDate = expiryDate;
+    const hasStock = initialQuantity > 0;
     if (hasStock) {
-      // batch/expiry already present (validated above)
+      if (!resolvedBatchNumber) {
+        resolvedBatchNumber = "OPENING-STOCK";
+        warnings.push("Batch Number is missing - a default batch 'OPENING-STOCK' was created.");
+      }
+      if (!resolvedExpiryDate) {
+        resolvedExpiryDate = "2099-12-31";
+        warnings.push("Expiry Date is missing - a default expiry of 2099-12-31 was used.");
+      }
     } else if (batchNumber || expiryDate) {
       notes.push("Batch information ignored because Initial Quantity is 0 or blank.");
     }
@@ -306,7 +310,7 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     }
 
     // --- Expiry sanity warnings ---------------------------------------
-    if (expiryDate && expiryDate < today && hasStock) {
+    if (resolvedExpiryDate && resolvedExpiryDate < today && hasStock) {
       warnings.push("Expiry Date is in the past - this stock cannot be sold through the POS (FEFO rules).");
     }
     if (costPrice !== null && sellingPrice !== null && costPrice >= sellingPrice && sellingPrice > 0) {
@@ -401,10 +405,10 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
       wholesalePrice,
       initialQuantity,
       hasStock,
-      batchNumber: hasStock ? batchNumber : null,
+      batchNumber: hasStock ? resolvedBatchNumber : null,
       costPrice,
       manufacturingDate: hasStock ? manufacturingDate : null,
-      expiryDate: hasStock ? expiryDate : null,
+      expiryDate: hasStock ? resolvedExpiryDate : null,
       supplierName,
       supplierId,
       purchaseReference: hasStock ? purchaseReference : null,

@@ -2231,13 +2231,18 @@ function validateWorkbookRows(workbook, reference) {
     if (!expiryResult.ok) errors.push(expiryResult.reason);
     const expiryDate = expiryResult.ok ? expiryResult.value : null;
     const batchNumber = toText(raw.batchNumber);
-    const hasStock = initialQuantity > 0 && !!batchNumber && !!expiryDate;
-    if (initialQuantity > 0 && (!batchNumber || !expiryDate)) {
-      warnings.push(
-        "Opening quantity recorded but stock not initialized because Batch Number/Expiry Date is missing. Product will be imported without stock; add stock later via Add Stock."
-      );
-    }
+    let resolvedBatchNumber = batchNumber;
+    let resolvedExpiryDate = expiryDate;
+    const hasStock = initialQuantity > 0;
     if (hasStock) {
+      if (!resolvedBatchNumber) {
+        resolvedBatchNumber = "OPENING-STOCK";
+        warnings.push("Batch Number is missing - a default batch 'OPENING-STOCK' was created.");
+      }
+      if (!resolvedExpiryDate) {
+        resolvedExpiryDate = "2099-12-31";
+        warnings.push("Expiry Date is missing - a default expiry of 2099-12-31 was used.");
+      }
     } else if (batchNumber || expiryDate) {
       notes.push("Batch information ignored because Initial Quantity is 0 or blank.");
     }
@@ -2277,7 +2282,7 @@ function validateWorkbookRows(workbook, reference) {
         skuGeneratedCount++;
       }
     }
-    if (expiryDate && expiryDate < today && hasStock) {
+    if (resolvedExpiryDate && resolvedExpiryDate < today && hasStock) {
       warnings.push("Expiry Date is in the past - this stock cannot be sold through the POS (FEFO rules).");
     }
     if (costPrice !== null && sellingPrice !== null && costPrice >= sellingPrice && sellingPrice > 0) {
@@ -2364,10 +2369,10 @@ function validateWorkbookRows(workbook, reference) {
       wholesalePrice,
       initialQuantity,
       hasStock,
-      batchNumber: hasStock ? batchNumber : null,
+      batchNumber: hasStock ? resolvedBatchNumber : null,
       costPrice,
       manufacturingDate: hasStock ? manufacturingDate : null,
-      expiryDate: hasStock ? expiryDate : null,
+      expiryDate: hasStock ? resolvedExpiryDate : null,
       supplierName,
       supplierId,
       purchaseReference: hasStock ? purchaseReference : null,

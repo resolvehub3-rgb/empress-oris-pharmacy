@@ -3059,7 +3059,7 @@ importRouter.get(
 import * as XLSX3 from "xlsx";
 import { Router as Router3 } from "express";
 import multer2 from "multer";
-import { eq as eq4 } from "drizzle-orm";
+import { eq as eq4, inArray } from "drizzle-orm";
 var productsRouter = Router3();
 var upload = multer2({
   storage: multer2.memoryStorage(),
@@ -3534,6 +3534,40 @@ productsRouter.put("/:id/price", requireAuthentication, requireRole(["OWNER", "A
 productsRouter.patch("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
 productsRouter.post("/:id/price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
 productsRouter.put("/:id/update-price", requireAuthentication, requireRole(["OWNER", "ADMIN"]), updateProductPrice);
+async function deactivateProducts(req, res, ids) {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "Database not connected." });
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "No product IDs provided." });
+  }
+  try {
+    await db.update(schema_exports.products).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where(inArray(schema_exports.products.id, ids));
+    await db.insert(schema_exports.auditLogs).values({
+      userId: req.user?.id,
+      action: "PRODUCTS_DELETED",
+      entityType: "PRODUCT",
+      entityId: null,
+      details: { ids, count: ids.length },
+      ipAddress: req.ip
+    });
+    await broadcastRealtimeEvent("PRODUCT_DELETED", { ids });
+    return res.json({ success: true, message: `${ids.length} product(s) deleted.` });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to delete products." });
+  }
+}
+productsRouter.post("/bulk-delete", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  return deactivateProducts(req, res, req.body?.ids);
+});
+productsRouter.delete("/bulk", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  return deactivateProducts(req, res, req.body?.ids || req.query?.ids);
+});
+productsRouter.delete("/bulk-delete", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  return deactivateProducts(req, res, req.body?.ids || req.query?.ids);
+});
+productsRouter.delete("/:id", requireAuthentication, requireRole(["OWNER", "ADMIN"]), async (req, res) => {
+  return deactivateProducts(req, res, [req.params.id]);
+});
 
 // src/server/routes/stock.ts
 import { Router as Router4 } from "express";

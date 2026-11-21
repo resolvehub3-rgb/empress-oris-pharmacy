@@ -54,6 +54,8 @@ export function ProductsPage({
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBulk, setDeletingBulk] = useState(false);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -150,6 +152,30 @@ export function ProductsPage({
               <FileSpreadsheet className="w-4 h-4" />
               <span>Import Products</span>
             </button>
+            {(user?.role === "OWNER" || user?.role === "ADMIN") && selectedIds.size > 0 && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm(`Delete ${selectedIds.size} selected product(s)?`)) return;
+                  setDeletingBulk(true);
+                  try {
+                    await apiRequest("/api/products/bulk-delete", {
+                      method: "POST",
+                      body: JSON.stringify({ ids: Array.from(selectedIds) }),
+                    });
+                    setSelectedIds(new Set());
+                    setRefreshKey((k) => k + 1);
+                  } catch (err: any) {
+                    alert("Failed to delete products: " + err.message);
+                  } finally {
+                    setDeletingBulk(false);
+                  }
+                }}
+                disabled={deletingBulk}
+                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center space-x-1.5 disabled:opacity-50"
+              >
+                <span>{deletingBulk ? "Deleting..." : `Delete Selected (${selectedIds.size})`}</span>
+              </button>
+            )}
             {["xlsx", "xls"].map((fmt) => (
               <button
                 key={fmt}
@@ -271,6 +297,21 @@ export function ProductsPage({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100">
                 <tr>
+                  <th className="px-5 py-3 w-8">
+                    {(user?.role === "OWNER" || user?.role === "ADMIN") && (
+                      <input
+                        type="checkbox"
+                        checked={products.length > 0 && selectedIds.size === products.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds(new Set(products.map((p: any) => p.id)));
+                          } else {
+                            setSelectedIds(new Set());
+                          }
+                        }}
+                      />
+                    )}
+                  </th>
                   <th className="px-5 py-3 w-8"></th>
                   <th className="px-5 py-3">Product Name & Generic</th>
                   <th className="px-5 py-3">SKU / Barcode</th>
@@ -293,6 +334,20 @@ export function ProductsPage({
                   return (
                     <React.Fragment key={p.id}>
                       <tr className="hover:bg-slate-50 transition">
+                        <td className="px-3 py-3 text-center">
+                          {(user?.role === "OWNER" || user?.role === "ADMIN") && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(p.id)}
+                              onChange={(e) => {
+                                const next = new Set(selectedIds);
+                                if (e.target.checked) next.add(p.id);
+                                else next.delete(p.id);
+                                setSelectedIds(next);
+                              }}
+                            />
+                          )}
+                        </td>
                         <td className="px-3 py-3 text-center">
                           <button
                             onClick={() => toggleExpand(p.id)}
@@ -424,7 +479,7 @@ export function ProductsPage({
                       {/* Expandable Batches Subtable */}
                       {isExpanded && (
                         <tr className="bg-slate-50/80 border-b border-slate-200">
-                          <td colSpan={8} className="p-4 pl-12">
+                          <td colSpan={9} className="p-4 pl-12">
                             <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
                               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">

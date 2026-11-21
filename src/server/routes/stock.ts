@@ -340,3 +340,50 @@ stockRouter.get("/movements", requireAuthentication, async (req: Request, res: R
     return res.status(500).json({ error: err.message || "Failed to fetch movements" });
   }
 });
+
+
+// Delete batch(es) - Owner only (blocked if the batch has recorded sales)
+async function deleteBatches(req: Request, res: Response, ids: any) {
+  const rawSql = getRawSql();
+  if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+
+  const idList = Array.isArray(ids) ? ids : (ids ? [ids] : []);
+  if (idList.length === 0) {
+    return res.status(400).json({ error: "No batch IDs provided." });
+  }
+
+  try {
+    await rawSql.begin(async (tx) => {
+      for (const id of idList) {
+        const [hasSale] = await tx`SELECT 1 FROM sale_batches WHERE batch_id = ${id} LIMIT 1`;
+        if (hasSale) {
+          throw new Error(`Cannot delete batch ${id}: it has recorded sales.`);
+        }
+        await tx`DELETE FROM stock_movements WHERE batch_id = ${id}`;
+        const result = await tx`DELETE FROM batches WHERE id = ${id} RETURNING id`;
+        if (result.length === 0) {
+          throw new Error(`Batch ${id} not found.`);
+        }
+      }
+    });
+
+    await broadcastRealtimeEvent("STOCK_UPDATED", { action: "BATCH_DELETED", ids: idList });
+
+    return res.json({ success: true, message: `${idList.length} batch(es) deleted.` });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || "Failed to delete batch(es)." });
+  }
+}
+
+stockRouter.post("/batches/bulk-delete", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+  return deleteBatches(req, res, req.body?.ids);
+});
+stockRouter.delete("/batches/bulk", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+  return deleteBatches(req, res, req.body?.ids || req.query?.ids);
+});
+stockRouter.delete("/batches/bulk-delete", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+  return deleteBatches(req, res, req.body?.ids || req.query?.ids);
+});
+stockRouter.delete("/batches/:id", requireAuthentication, requireRole(["OWNER"]), async (req, res) => {
+  return deleteBatches(req, res, [req.params.id]);
+});

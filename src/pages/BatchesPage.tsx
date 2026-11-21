@@ -1,19 +1,24 @@
 import React, { useState, useEffect } from "react";
-import { CalendarDays, AlertTriangle, AlertCircle, Search, Filter, ShieldCheck } from "lucide-react";
+import { CalendarDays, AlertTriangle, AlertCircle, Search, Filter, ShieldCheck, Trash2 } from "lucide-react";
 import { Batch } from "../types";
 import { apiRequest } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
 
 export function BatchesPage() {
+  const { user } = useAuth();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "active" | "expiring_soon" | "expired">("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBulk, setDeletingBulk] = useState(false);
 
   const fetchBatches = async () => {
     setLoading(true);
     try {
       const res = await apiRequest<{ batches: any[] }>(`/api/stock/batches?filter=${filter}`);
       setBatches(res.batches || []);
+      setSelectedIds(new Set());
     } catch (err) {
       console.warn("[BatchesPage] Error:", err);
     } finally {
@@ -72,6 +77,33 @@ export function BatchesPage() {
         </div>
       </div>
 
+      {user?.role === "OWNER" && selectedIds.size > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={async () => {
+              if (!window.confirm(`Delete ${selectedIds.size} selected batch(es)?`)) return;
+              setDeletingBulk(true);
+              try {
+                await apiRequest("/api/stock/batches/bulk-delete", {
+                  method: "POST",
+                  body: JSON.stringify({ ids: Array.from(selectedIds) }),
+                });
+                setSelectedIds(new Set());
+                fetchBatches();
+              } catch (err: any) {
+                alert("Failed to delete batches: " + err.message);
+              } finally {
+                setDeletingBulk(false);
+              }
+            }}
+            disabled={deletingBulk}
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-2xs transition disabled:opacity-50"
+          >
+            {deletingBulk ? "Deleting..." : `Delete Selected (${selectedIds.size})`}
+          </button>
+        </div>
+      )}
+
       {/* Batches Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
         {loading ? (
@@ -90,6 +122,7 @@ export function BatchesPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-100">
                 <tr>
+                  {user?.role === "OWNER" && <th className="px-5 py-3 w-8"></th>}
                   <th className="px-5 py-3">Batch Number</th>
                   <th className="px-5 py-3">Product Name</th>
                   <th className="px-5 py-3">Supplier</th>
@@ -98,6 +131,7 @@ export function BatchesPage() {
                   <th className="px-5 py-3 text-right">Selling Price</th>
                   <th className="px-5 py-3 font-mono">Expiry Date</th>
                   <th className="px-5 py-3 text-center">FEFO Status</th>
+                  {user?.role === "OWNER" && <th className="px-5 py-3 text-center">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -108,6 +142,20 @@ export function BatchesPage() {
 
                   return (
                     <tr key={b.id} className="hover:bg-slate-50 transition">
+                      {user?.role === "OWNER" && (
+                        <td className="px-5 py-3.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(b.id)}
+                            onChange={(e) => {
+                              const next = new Set(selectedIds);
+                              if (e.target.checked) next.add(b.id);
+                              else next.delete(b.id);
+                              setSelectedIds(next);
+                            }}
+                          />
+                        </td>
+                      )}
                       <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
                         {b.batch_number}
                       </td>
@@ -150,6 +198,24 @@ export function BatchesPage() {
                           </span>
                         )}
                       </td>
+                      {user?.role === "OWNER" && (
+                        <td className="px-5 py-3.5 text-center">
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Delete batch ${b.batch_number}?`)) return;
+                              try {
+                                await apiRequest(`/api/stock/batches/${b.id}`, { method: "DELETE" });
+                                fetchBatches();
+                              } catch (err: any) {
+                                alert("Failed to delete batch: " + err.message);
+                              }
+                            }}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-lg text-[10px]"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

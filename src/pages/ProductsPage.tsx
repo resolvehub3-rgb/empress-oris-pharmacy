@@ -18,7 +18,7 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { Product, Category, Supplier } from "../types";
-import { apiRequest } from "../lib/api";
+import { apiRequest, getAuthToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { ImportProductsModal } from "../components/ImportProductsModal";
 import { subscribeToPharmacyRealtime } from "../lib/supabaseClient";
@@ -150,6 +150,36 @@ export function ProductsPage({
               <FileSpreadsheet className="w-4 h-4" />
               <span>Import Products</span>
             </button>
+            {["xlsx", "xls"].map((fmt) => (
+              <button
+                key={fmt}
+                onClick={async () => {
+                  try {
+                    const token = getAuthToken();
+                    const res = await fetch(`/api/products/export?format=${fmt}`, {
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    });
+                    if (!res.ok) throw new Error("Export failed");
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `Product-Catalog.${fmt}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  } catch (err: any) {
+                    alert("Failed to export products: " + err.message);
+                  }
+                }}
+                className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 transition flex items-center space-x-1.5"
+                title={`Export product catalog to .${fmt}`}
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Export {fmt.toUpperCase()}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>

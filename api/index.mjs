@@ -3056,6 +3056,7 @@ importRouter.get(
 );
 
 // src/server/routes/products.ts
+import * as XLSX3 from "xlsx";
 import { Router as Router3 } from "express";
 import multer2 from "multer";
 import { eq as eq4 } from "drizzle-orm";
@@ -3161,6 +3162,58 @@ productsRouter.get("/", requireAuthentication, async (req, res) => {
     return res.status(500).json({ error: err.message || "Failed to fetch products" });
   }
 });
+productsRouter.get(
+  "/export",
+  requireAuthentication,
+  requireRole(["OWNER", "ADMIN"]),
+  async (req, res) => {
+    const rawSql = getRawSql();
+    if (!rawSql) return res.status(503).json({ error: "Database not connected." });
+    try {
+      const format = String(req.query.format || "xlsx").toLowerCase() === "xls" ? "xls" : "xlsx";
+      const query = `
+        SELECT 
+          p.*,
+          c.name as category_name,
+          COALESCE(SUM(CASE WHEN b.current_quantity > 0 AND b.expiry_date >= CURRENT_DATE THEN b.current_quantity ELSE 0 END), 0)::integer as total_stock,
+          COUNT(b.id)::integer as batch_count
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        LEFT JOIN batches b ON p.id = b.product_id
+        WHERE p.is_active = true
+        GROUP BY p.id, c.name
+        ORDER BY p.name ASC
+      `;
+      const products2 = await rawSql.unsafe(query);
+      const rows = (products2 || []).map((p) => ({
+        "Product Name": p.name,
+        "Generic Name": p.generic_name || "",
+        "SKU": p.sku,
+        "Barcode": p.barcode || "",
+        "Category": p.category_name || "General",
+        "Dosage Form": p.dosage_form || "",
+        "Strength": p.strength || "",
+        "Selling Price (GH\u20B5)": parseFloat(p.selling_price || "0"),
+        "Available Stock": p.total_stock || 0,
+        "Batches": p.batch_count || 0
+      }));
+      const worksheet = XLSX3.utils.json_to_sheet(rows);
+      const workbook = XLSX3.utils.book_new();
+      XLSX3.utils.book_append_sheet(workbook, worksheet, "Product Catalog");
+      const buffer = XLSX3.write(workbook, { type: "buffer", bookType: format });
+      const fileName = `Product-Catalog.${format}`;
+      res.setHeader(
+        "Content-Type",
+        format === "xls" ? "application/vnd.ms-excel" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+      return res.send(buffer);
+    } catch (err) {
+      console.error("[Export Products] Error:", err);
+      return res.status(500).json({ error: err.message || "Failed to export products." });
+    }
+  }
+);
 productsRouter.get("/:id", requireAuthentication, async (req, res) => {
   const db = getDb();
   if (!db) return res.status(503).json({ error: "Database not connected." });

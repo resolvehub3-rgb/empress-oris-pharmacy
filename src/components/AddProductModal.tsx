@@ -53,7 +53,7 @@ export function AddProductModal({
   const [manufacturer, setManufacturer] = useState("");
   const [description, setDescription] = useState("");
   const [prescriptionRequired, setPrescriptionRequired] = useState(false);
-  const [reorderLevel, setReorderLevel] = useState("10");
+  const [reorderLevel, setReorderLevel] = useState("3");
   const [sellingPrice, setSellingPrice] = useState("");
   const [wholesalePrice, setWholesalePrice] = useState("");
   const [imageUrl, setImageUrl] = useState("");
@@ -208,7 +208,7 @@ export function AddProductModal({
         description: description.trim() || null,
         prescriptionRequired,
         imageUrl: imageUrl || null,
-        reorderLevel: parseInt(reorderLevel) || 10,
+        reorderLevel: parseInt(reorderLevel) || 3,
         sellingPrice: parseFloat(sellingPrice),
         wholesalePrice: wholesalePrice ? parseFloat(wholesalePrice) : null,
         // Initial Stock Fields

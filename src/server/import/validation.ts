@@ -221,9 +221,9 @@ export function validateWorkbookRows(workbook: ParsedWorkbook, reference: Refere
     if (!packSizeResult.ok) errors.push(packSizeResult.reason);
     const packSize = packSizeResult.ok ? (packSizeResult.value ?? 1) : 1;
 
-    const reorderResult = toInteger(raw.reorderLevel, "Reorder Level", { required: false, min: 0, max: 1000000, fallback: 10 });
+    const reorderResult = toInteger(raw.reorderLevel, "Reorder Level", { required: false, min: 0, max: 1000000, fallback: 3 });
     if (!reorderResult.ok) errors.push(reorderResult.reason);
-    const reorderLevel = reorderResult.ok ? (reorderResult.value ?? 10) : 10;
+    const reorderLevel = reorderResult.ok ? (reorderResult.value ?? 3) : 3;
 
     const quantityMissing = raw.initialQuantity === null || raw.initialQuantity === undefined || (typeof raw.initialQuantity === "string" && raw.initialQuantity.trim() === "");
     const quantityResult = toInteger(raw.initialQuantity, "Initial Quantity", { required: false, min: 0, max: 100000000, fallback: 0 });

@@ -326,7 +326,7 @@ export function ProductsPage({
                 {products.map((p: any) => {
                   const isExpanded = expandedProductId === p.id;
                   const totalStock = p.total_stock !== undefined ? p.total_stock : p.totalStock || 0;
-                  const reorder = p.reorder_level || p.reorderLevel || 10;
+                  const reorder = p.reorder_level || p.reorderLevel || 3;
                   const isLow = totalStock <= reorder;
                   const isZero = totalStock <= 0;
                   const batchList = p.batches || [];

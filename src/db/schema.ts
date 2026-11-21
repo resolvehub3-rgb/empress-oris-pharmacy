@@ -98,7 +98,7 @@ export const products = pgTable("products", {
   description: text("description"),
   prescriptionRequired: boolean("prescription_required").default(false).notNull(),
   imageUrl: text("image_url"),
-  reorderLevel: integer("reorder_level").default(10).notNull(),
+  reorderLevel: integer("reorder_level").default(3).notNull(),
   sellingPrice: numeric("selling_price", { precision: 12, scale: 2 }).notNull().default("0.00"),
   wholesalePrice: numeric("wholesale_price", { precision: 12, scale: 2 }),
   isActive: boolean("is_active").default(true).notNull(),

@@ -360,7 +360,7 @@ var products = pgTable("products", {
   description: text("description"),
   prescriptionRequired: boolean("prescription_required").default(false).notNull(),
   imageUrl: text("image_url"),
-  reorderLevel: integer("reorder_level").default(10).notNull(),
+  reorderLevel: integer("reorder_level").default(3).notNull(),
   sellingPrice: numeric("selling_price", { precision: 12, scale: 2 }).notNull().default("0.00"),
   wholesalePrice: numeric("wholesale_price", { precision: 12, scale: 2 }),
   isActive: boolean("is_active").default(true).notNull(),
@@ -1571,7 +1571,7 @@ var COLUMNS = [
     label: "Reorder Level",
     required: false,
     kind: "integer",
-    hint: "Low-stock alert threshold (whole number >= 0, default 10).",
+    hint: "Low-stock alert threshold (whole number >= 0, default 3).",
     aliases: ["reorderlevel", "reorderpoint", "minimumstock", "minstock", "lowstocklevel", "reorderqty"]
   },
   {
@@ -2211,9 +2211,9 @@ function validateWorkbookRows(workbook, reference) {
     const packSizeResult = toInteger(raw.packSize, "Pack Size", { required: false, min: 1, max: 1e5, fallback: 1 });
     if (!packSizeResult.ok) errors.push(packSizeResult.reason);
     const packSize = packSizeResult.ok ? packSizeResult.value ?? 1 : 1;
-    const reorderResult = toInteger(raw.reorderLevel, "Reorder Level", { required: false, min: 0, max: 1e6, fallback: 10 });
+    const reorderResult = toInteger(raw.reorderLevel, "Reorder Level", { required: false, min: 0, max: 1e6, fallback: 3 });
     if (!reorderResult.ok) errors.push(reorderResult.reason);
-    const reorderLevel = reorderResult.ok ? reorderResult.value ?? 10 : 10;
+    const reorderLevel = reorderResult.ok ? reorderResult.value ?? 3 : 3;
     const quantityMissing = raw.initialQuantity === null || raw.initialQuantity === void 0 || typeof raw.initialQuantity === "string" && raw.initialQuantity.trim() === "";
     const quantityResult = toInteger(raw.initialQuantity, "Initial Quantity", { required: false, min: 0, max: 1e8, fallback: 0 });
     if (!quantityResult.ok) errors.push(quantityResult.reason);
@@ -3341,7 +3341,7 @@ productsRouter.post(
             ${categoryId || null}, ${dosageForm || null}, ${strength || null}, ${unit || "Pack"},
             ${packSize ? parseInt(packSize) : 1}, ${manufacturer || null}, ${description || null},
             ${prescriptionRequired ? true : false}, ${imageUrl || null},
-            ${reorderLevel ? parseInt(reorderLevel) : 10},
+            ${reorderLevel ? parseInt(reorderLevel) : 3},
             ${sellingPrice ? parseFloat(sellingPrice) : 0},
             ${wholesalePrice ? parseFloat(wholesalePrice) : null}
           )
@@ -3482,7 +3482,7 @@ productsRouter.put(
       if (description !== void 0) updateData.description = description;
       if (prescriptionRequired !== void 0) updateData.prescriptionRequired = !!prescriptionRequired;
       if (imageUrl !== void 0) updateData.imageUrl = imageUrl;
-      if (reorderLevel !== void 0) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 10;
+      if (reorderLevel !== void 0) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 3;
       if (sellingPrice !== void 0) updateData.sellingPrice = sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00";
       if (wholesalePrice !== void 0) updateData.wholesalePrice = wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null;
       if (isActive !== void 0) updateData.isActive = !!isActive;

@@ -155,7 +155,7 @@ export const COLUMNS: ColumnDef[] = [
     label: "Reorder Level",
     required: false,
     kind: "integer",
-    hint: "Low-stock alert threshold (whole number >= 0, default 10).",
+    hint: "Low-stock alert threshold (whole number >= 0, default 3).",
     aliases: ["reorderlevel", "reorderpoint", "minimumstock", "minstock", "lowstocklevel", "reorderqty"],
   },
   {

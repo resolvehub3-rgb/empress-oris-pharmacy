@@ -339,7 +339,7 @@ productsRouter.post(
             ${categoryId || null}, ${dosageForm || null}, ${strength || null}, ${unit || "Pack"},
             ${packSize ? parseInt(packSize) : 1}, ${manufacturer || null}, ${description || null},
             ${prescriptionRequired ? true : false}, ${imageUrl || null},
-            ${reorderLevel ? parseInt(reorderLevel) : 10},
+            ${reorderLevel ? parseInt(reorderLevel) : 3},
             ${sellingPrice ? parseFloat(sellingPrice) : 0.0},
             ${wholesalePrice ? parseFloat(wholesalePrice) : null}
           )
@@ -508,7 +508,7 @@ productsRouter.put(
       if (description !== undefined) updateData.description = description;
       if (prescriptionRequired !== undefined) updateData.prescriptionRequired = !!prescriptionRequired;
       if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
-      if (reorderLevel !== undefined) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 10;
+      if (reorderLevel !== undefined) updateData.reorderLevel = reorderLevel ? parseInt(reorderLevel) : 3;
       if (sellingPrice !== undefined) updateData.sellingPrice = sellingPrice ? parseFloat(sellingPrice).toFixed(2) : "0.00";
       if (wholesalePrice !== undefined) updateData.wholesalePrice = wholesalePrice ? parseFloat(wholesalePrice).toFixed(2) : null;
       if (isActive !== undefined) updateData.isActive = !!isActive;

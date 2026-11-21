@@ -214,7 +214,7 @@ export function LowStockAlertBanner({
                   generic_name: prod.generic_name,
                   sku: prod.sku,
                   barcode: prod.barcode,
-                  reorderLevel: prod.reorder_level || 10,
+                  reorderLevel: prod.reorder_level || 3,
                   reorder_level: prod.reorder_level,
                   totalStock: prod.current_stock || 0,
                   dosage_form: prod.dosage_form,
